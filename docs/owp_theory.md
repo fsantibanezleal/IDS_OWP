@@ -386,7 +386,224 @@ This is a K-fold reduction in estimation variance, leading to more reliable entr
 
 In practice, TIs are not independent -- they share the same geological concept but differ in specific realization. The multi-TI approach captures this geological uncertainty: positions where TIs disagree have higher estimated entropy, while positions where all TIs agree have lower entropy. This naturally directs sampling toward geologically ambiguous regions.
 
-## 15. Comparison of All Sampling Methods
+## 15. Information Theory Foundation (Extended)
+
+### 15.1 Shannon Entropy as Uncertainty Measure
+
+Shannon entropy quantifies the average surprise (information content) of a random variable. For a discrete random variable X with probability mass function P(x):
+
+```
+H(X) = -sum_x P(x) * log2(P(x))
+```
+
+Entropy is measured in bits (when using log base 2). A fair coin has H = 1 bit; a biased coin with p = 0.9 has H = 0.47 bits. The entropy is maximized for the uniform distribution: H(X) <= log2(|X|).
+
+### 15.2 Joint and Conditional Entropy
+
+For two random variables X, Y:
+
+```
+H(X, Y) = -sum_{x,y} P(x,y) * log2(P(x,y))
+```
+
+The chain rule decomposes joint entropy:
+
+```
+H(X, Y) = H(X) + H(Y|X) = H(Y) + H(X|Y)
+```
+
+For N variables, the general chain rule is:
+
+```
+H(X_1, X_2, ..., X_N) = sum_{i=1}^{N} H(X_i | X_1, X_2, ..., X_{i-1})
+```
+
+This is the foundation of the AdSEMES algorithm: each new measurement reduces the remaining conditional entropy.
+
+### 15.3 Mutual Information
+
+Mutual information measures the shared information between two variables:
+
+```
+I(X; Y) = H(X) - H(X|Y) = H(Y) - H(Y|X) = H(X) + H(Y) - H(X, Y)
+```
+
+Properties:
+- I(X; Y) >= 0, with equality iff X and Y are independent
+- I(X; Y) = I(Y; X) (symmetric)
+- I(X; Y) <= min(H(X), H(Y))
+
+![Information Theory](svg/information_theory.svg)
+
+For OWP, the mutual information I(X_f; X^f) measures how much sampling at positions f tells us about the unsampled field X^f. Maximizing I is equivalent to minimizing the posterior uncertainty H(X^f | X_f).
+
+---
+
+## 16. Submodularity of Entropy (Extended)
+
+### 16.1 Definition and Intuition
+
+A set function f: 2^V -> R is submodular if for all A subset B subset V and for all x not in B:
+
+```
+f(A union {x}) - f(A) >= f(B union {x}) - f(B)
+```
+
+This is the **diminishing returns** property: adding element x to a smaller set A gives at least as much marginal gain as adding it to a larger set B that contains A.
+
+### 16.2 Proof that Entropy is Submodular
+
+The conditional entropy satisfies:
+
+```
+H(X_A | X_B) >= H(X_A | X_C)    when B subset C
+```
+
+This follows from the information-theoretic inequality: conditioning reduces entropy (or keeps it equal). More data (C has more variables than B) can only reduce or maintain uncertainty about X_A.
+
+The marginal gain of adding position x to set S is:
+
+```
+Delta(x | S) = H(X_{S union {x}}) - H(X_S) = H(X_x | X_S)
+```
+
+Since H(X_x | X_S) >= H(X_x | X_T) when S subset T (more conditioning reduces entropy), the marginal gain decreases as S grows. This is exactly the submodularity condition.
+
+### 16.3 Greedy Approximation Guarantee
+
+The celebrated result of Nemhauser, Wolsey, and Fisher (1978) states that for any non-negative monotone submodular function f with f(empty) = 0, the greedy algorithm that iteratively selects:
+
+```
+x_k = argmax_{x not in S_{k-1}} [f(S_{k-1} union {x}) - f(S_{k-1})]
+```
+
+achieves:
+
+```
+f(S_greedy) >= (1 - 1/e) * f(S_optimal) ~ 0.632 * f(S_optimal)
+```
+
+This 63.2% guarantee is tight: there exist instances where greedy achieves exactly this ratio. For entropy maximization in OWP, this means the greedy AdSEMES algorithm captures at least 63.2% of the maximum possible information gain.
+
+---
+
+## 17. Training Image Statistics (Extended)
+
+### 17.1 Pattern Matching Algorithm
+
+The conditional probability P(X_i = 1 | known neighbors) is estimated by scanning the Training Image (TI) for matching patterns.
+
+**Algorithm:**
+```
+1. Extract pattern template T centered at position i
+   T is a (2r+1) x (2r+1) window
+   Known positions have values {0, 1}
+   Unknown positions are marked as "don't care"
+
+2. Scan TI at every position (u, v):
+   For each (u, v):
+     Extract TI patch P at (u, v) with same template shape
+     Compare: does P match T at all known positions?
+     If yes: record center value P[r, r]
+
+3. Estimate conditional probability:
+   N_1 = count of matches with center = 1
+   N_0 = count of matches with center = 0
+   P(X_i = 1 | neighbors) = N_1 / (N_1 + N_0)
+
+4. Fallback: if N_1 + N_0 = 0 (no matches):
+   P(X_i = 1) = mean(TI)   [marginal probability]
+```
+
+### 17.2 Template Size and Computational Cost
+
+The pattern radius r determines:
+- **Spatial reach**: Larger r captures longer-range dependencies
+- **Match sparsity**: Larger templates have fewer matches in the TI
+- **Computational cost**: O(TI_H * TI_W * (2r+1)^2) per position per step
+
+In practice, r = 2-5 balances spatial information with match count.
+
+---
+
+## 18. Stopping Rule for Sampling
+
+### 18.1 Resolvability Capacity Curve
+
+The resolvability capacity curve C_k = I(f*_k) / H(X) tracks how much of the total field uncertainty has been resolved after k measurements.
+
+![Resolvability Curve](svg/resolvability_curve.svg)
+
+### 18.2 Marginal Information Gain
+
+The marginal information gain at step k is:
+
+```
+Delta_k = C_k - C_{k-1} = [I(f*_k) - I(f*_{k-1})] / H(X)
+```
+
+This represents the fraction of total entropy resolved by the kth measurement.
+
+### 18.3 Stopping Rule
+
+The optimal stopping point is where the marginal gain drops below a threshold:
+
+```
+Stop when Delta_k = dC_k/dk < epsilon
+```
+
+Typical epsilon values:
+- epsilon = 0.01: Stop when each new well resolves < 1% of total entropy
+- epsilon = 0.005: More conservative, continue sampling longer
+
+The stopping rule determines how many wells are "enough" -- beyond this point, additional measurements provide negligible information about the field. This has direct economic implications: each well has a drilling cost, and the stopping rule defines the point of diminishing return on investment.
+
+---
+
+## 19. Connection to Kriging
+
+### 19.1 Kriging as Variance Minimization
+
+Indicator kriging estimates the probability P(X_i = 1) by minimizing the estimation variance:
+
+```
+sigma^2_K = Var(X_i - X_hat_i)
+```
+
+subject to the unbiasedness constraint E[X_i - X_hat_i] = 0. The kriging weights w_j are found by solving:
+
+```
+sum_j w_j * C(x_j, x_k) + mu = C(x_i, x_k)   for all k
+sum_j w_j = 1
+```
+
+where C(x_j, x_k) is the covariance between positions j and k.
+
+### 19.2 Entropy-Kriging Equivalence for Gaussian Fields
+
+For a Gaussian random field, entropy is a monotonic function of variance:
+
+```
+H(X_i | observations) = (1/2) * log2(2*pi*e*sigma^2_K)
+```
+
+Therefore:
+- Minimizing posterior variance (kriging) is equivalent to minimizing posterior entropy
+- Maximizing information gain (entropy approach) is equivalent to maximizing variance reduction
+
+This means that for Gaussian fields, the AdSEMES algorithm and optimal kriging-based sampling design converge to the same solution.
+
+### 19.3 Advantages of the Entropy Approach
+
+For non-Gaussian fields (such as binary facies fields):
+- Kriging assumes linearity and Gaussianity, which may not hold
+- Entropy-based methods make no distributional assumptions
+- Pattern matching captures higher-order spatial statistics (multi-point) that variograms (two-point) cannot represent
+- The submodularity guarantee still holds regardless of the field distribution
+
+---
+
+## 20. Comparison of All Sampling Methods
 
 | Method | Adaptive | Uses TI | Multi-TI | Penalized | Coverage Guarantee | Complexity | Expected Quality |
 |--------|----------|---------|----------|-----------|-------------------|------------|-----------------|
