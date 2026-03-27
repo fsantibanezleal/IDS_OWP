@@ -1,0 +1,13 @@
+Inference Methods
+
+Reconstruction Based Methods.
+	Variability of MPS
+	Voronoi Segmentation	
+	TV-Minimization
+	SVM
+	Inpainting
+	Entrop based segmentation
+
+Indicator Based Methods
+	Flow
+	Transport

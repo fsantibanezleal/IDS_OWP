@@ -1,0 +1,74 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 500">
+  <defs>
+    <style>
+      .box { fill: #1e2a3a; stroke: #4a9eff; stroke-width: 2; rx: 8; }
+      .box-green { fill: #1a2e1a; stroke: #34d399; stroke-width: 2; rx: 8; }
+      .box-orange { fill: #2e2a1a; stroke: #f59e0b; stroke-width: 2; rx: 8; }
+      .title { font-family: sans-serif; font-size: 14px; fill: #e8eaed; font-weight: bold; text-anchor: middle; }
+      .label { font-family: sans-serif; font-size: 11px; fill: #9aa0a6; text-anchor: middle; }
+      .arrow { stroke: #4a9eff; stroke-width: 2; fill: none; marker-end: url(#arrowhead); }
+      .arrow-ws { stroke: #34d399; stroke-width: 2; fill: none; stroke-dasharray: 6,4; marker-end: url(#arrowhead-green); }
+    </style>
+    <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#4a9eff"/>
+    </marker>
+    <marker id="arrowhead-green" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#34d399"/>
+    </marker>
+  </defs>
+
+  <rect width="800" height="500" fill="#0f1419"/>
+
+  <!-- Browser -->
+  <rect class="box-orange" x="280" y="20" width="240" height="60"/>
+  <text class="title" x="400" y="45">Browser (Frontend)</text>
+  <text class="label" x="400" y="63">HTML / CSS / JavaScript</text>
+
+  <!-- FastAPI -->
+  <rect class="box" x="250" y="130" width="300" height="60"/>
+  <text class="title" x="400" y="155">FastAPI Application</text>
+  <text class="label" x="400" y="173">REST API + WebSocket (port 8008)</text>
+
+  <!-- Simulation Modules -->
+  <rect class="box-green" x="40" y="250" width="140" height="50"/>
+  <text class="title" x="110" y="270">entropy.py</text>
+  <text class="label" x="110" y="288">Shannon H(p)</text>
+
+  <rect class="box-green" x="200" y="250" width="140" height="50"/>
+  <text class="title" x="270" y="270">sampling.py</text>
+  <text class="label" x="270" y="288">6 schemes</text>
+
+  <rect class="box-green" x="360" y="250" width="140" height="50"/>
+  <text class="title" x="430" y="270">inference.py</text>
+  <text class="label" x="430" y="288">3 methods</text>
+
+  <rect class="box-green" x="520" y="250" width="140" height="50"/>
+  <text class="title" x="590" y="270">metrics.py</text>
+  <text class="label" x="590" y="288">SNR, C_k, etc.</text>
+
+  <rect class="box-green" x="120" y="340" width="160" height="50"/>
+  <text class="title" x="200" y="360">field_generator.py</text>
+  <text class="label" x="200" y="378">Synthetic fields</text>
+
+  <rect class="box-green" x="320" y="340" width="180" height="50"/>
+  <text class="title" x="410" y="360">pattern_matching.py</text>
+  <text class="label" x="410" y="378">TI pattern stats</text>
+
+  <!-- Arrows -->
+  <line class="arrow" x1="380" y1="80" x2="380" y2="128"/>
+  <line class="arrow-ws" x1="420" y1="80" x2="420" y2="128"/>
+
+  <line class="arrow" x1="300" y1="190" x2="110" y2="248"/>
+  <line class="arrow" x1="370" y1="190" x2="270" y2="248"/>
+  <line class="arrow" x1="430" y1="190" x2="430" y2="248"/>
+  <line class="arrow" x1="500" y1="190" x2="590" y2="248"/>
+
+  <line class="arrow" x1="200" y1="300" x2="200" y2="338"/>
+  <line class="arrow" x1="340" y1="300" x2="380" y2="338"/>
+
+  <!-- Legend -->
+  <text class="label" x="680" y="440">REST API</text>
+  <line class="arrow" x1="630" y1="437" x2="670" y2="437"/>
+  <text class="label" x="680" y="465">WebSocket</text>
+  <line class="arrow-ws" x1="630" y1="462" x2="670" y2="462"/>
+</svg>

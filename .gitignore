@@ -1,0 +1,25 @@
+# Large data files (>70MB)
+*.mat
+legacy/_1_DB/
+legacy/_0_RawDB/
+legacy/_2_OutComes/
+legacy/_3_Analysis/
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db

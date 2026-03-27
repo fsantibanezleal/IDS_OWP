@@ -1,0 +1,12 @@
+Sampling Rutines from DB, RI:
+
+Non Preferential Sampling
+
+	Random
+	Structured
+	Random Structured
+
+Preferential Sampling
+	Economic based at diferent scales. Adaptive 
+	Theorical IT-OWP. Oracle based.
+	Practical IT-OWP. Adaptive Based on Data and TI
