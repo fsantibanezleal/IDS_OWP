@@ -282,3 +282,125 @@ Autocorrelation similarity between true and reconstructed fields at short lags.
 11. Ko, C. W., Lee, J., & Queyranne, M. (1995). An exact algorithm for maximum entropy sampling. Operations Research, 43(4), 684-691.
 
 12. Journel, A. G. (1983). Nonparametric estimation of spatial distributions. Journal of the International Association for Mathematical Geology, 15(3), 445-468.
+
+## 11. The Locality Problem in AdSEMES
+
+### 11.1 Problem Description
+
+Standard AdSEMES greedily selects the position with maximum conditional entropy at each step. After sampling a point, the positions immediately surrounding it gain the most conditioning data (they have the most known neighbors). This causes their conditional entropy estimates to change most dramatically -- but also makes them the most "interesting" candidates for the next sample.
+
+The result is a **locality trap**: samples cluster in one region of the field while leaving other regions unexplored. The greedy algorithm becomes myopic, optimizing local information gain rather than global field coverage.
+
+```
+Iteration diagram (locality problem):
+
+Step 1:  x . . . . . .     Step 5:  x x . . . . .
+         . . . . . . .              x x x . . . .
+         . . . . . . .              . x . . . . .
+         . . . . . . .              . . . . . . .
+
+Samples cluster in the top-left corner because each new
+observation makes its neighbors the highest-entropy positions.
+```
+
+### 11.2 Root Cause Analysis
+
+The conditional entropy H(X_i | known neighbors) depends on:
+1. The number of known neighbors (more neighbors = more information to condition on)
+2. The pattern statistics in the training image
+
+When a new sample is placed, positions within pattern_radius gain a new conditioning variable. For these positions, the conditional entropy changes significantly (either increases due to ambiguity or decreases due to resolution). Positions far from any sample have zero known neighbors and receive the marginal entropy -- which is constant and typically lower than the conditional entropy near sampled points.
+
+This creates a gradient that pulls the greedy selection toward existing samples.
+
+## 12. The Penalization Solution
+
+### 12.1 Spatial Penalty Function
+
+After placing sample k at position (i,j), apply a Gaussian penalty:
+
+    H_penalized(i',j') = H(i',j') * (1 - alpha * exp(-d^2 / (2*R^2)))
+
+where:
+- d = ||(i',j') - (i,j)|| is the Euclidean distance
+- alpha in (0, 1] is the penalty strength (penalty_decay)
+- R is the penalty radius in pixels
+
+The penalty multiplicatively suppresses entropy in a neighborhood, forcing the next sample to be placed further away.
+
+### 12.2 Penalty Properties
+
+- **Locality**: The penalty decays as a Gaussian, so its effect is limited to ~3R pixels.
+- **Composability**: Multiple penalties multiply, so regions near several samples are strongly suppressed.
+- **Asymptotic neutrality**: As alpha -> 0, the method reduces to standard AdSEMES.
+- **Global balance**: The penalty restores a balance between information-driven selection (entropy) and spatial coverage (penalty), addressing the locality problem without abandoning the information-theoretic framework.
+
+### 12.3 Parameter Guidelines
+
+| Parameter | Typical Range | Effect |
+|-----------|--------------|--------|
+| penalty_radius | 3-10 pixels | Larger = more forced spread |
+| penalty_decay | 0.3-0.8 | Larger = stronger penalty |
+
+## 13. Hybrid Stratified + Adaptive Approach
+
+### 13.1 Two-Phase Strategy
+
+Phase 1 allocates a fraction alpha (typically 0.3) of the budget to deterministic stratified samples that guarantee minimum spatial coverage. Phase 2 uses the remaining budget with penalized adaptive sampling, which now benefits from the stratified scaffold.
+
+The stratified phase ensures that conditioning data exists throughout the field before the adaptive phase begins. This prevents the adaptive phase from becoming local because:
+
+1. Every region of the field has at least one nearby observation.
+2. The penalty from stratified positions suppresses their immediate neighborhoods.
+3. The entropy landscape is more heterogeneous due to distributed conditioning data.
+
+### 13.2 Budget Allocation
+
+    n_stratified = floor(alpha * K)
+    n_adaptive = K - n_stratified
+
+Recommended alpha values:
+- alpha = 0.2: Minimal seeding, most budget for adaptive phase
+- alpha = 0.3: Balanced (default)
+- alpha = 0.5: Heavy seeding, robust but less adaptive
+
+## 14. Multi-Training-Image Averaging
+
+### 14.1 Theory
+
+Given K training images {TI_1, ..., TI_K}, the conditional probability at each position is estimated as:
+
+    P(X_i = 1 | pattern) = (1/K) * sum_k P_k(X_i = 1 | pattern)
+
+where P_k is computed from TI_k alone using the standard pattern matching approach.
+
+### 14.2 Variance Reduction
+
+If each TI provides an independent, unbiased estimate of the true conditional probability, then:
+
+    Var(P_multi) = (1/K) * Var(P_single)
+
+This is a K-fold reduction in estimation variance, leading to more reliable entropy estimates and better sampling decisions.
+
+### 14.3 Geological Uncertainty
+
+In practice, TIs are not independent -- they share the same geological concept but differ in specific realization. The multi-TI approach captures this geological uncertainty: positions where TIs disagree have higher estimated entropy, while positions where all TIs agree have lower entropy. This naturally directs sampling toward geologically ambiguous regions.
+
+## 15. Comparison of All Sampling Methods
+
+| Method | Adaptive | Uses TI | Multi-TI | Penalized | Coverage Guarantee | Complexity | Expected Quality |
+|--------|----------|---------|----------|-----------|-------------------|------------|-----------------|
+| Random Uniform | No | No | No | No | No | O(K) | Baseline |
+| Stratified Grid | No | No | No | No | Yes | O(K) | Good coverage |
+| Random Stratified | No | No | No | No | Yes | O(K) | Coverage + randomization |
+| Multiscale Stratified | No | No | No | No | Yes (multi-res) | O(K) | Multi-resolution |
+| Oracle Entropy | Yes | No | No | No | No | O(K*N) | Upper bound |
+| AdSEMES | Yes | Yes | No | No | No | O(K*N*TI) | Near-optimal (local risk) |
+| Penalized Adaptive | Yes | Yes | Yes | Yes | Soft | O(K*N*TI*K_TI) | Better coverage than AdSEMES |
+| Hybrid Stratified + Adaptive | Yes | Yes | Yes | Yes | Yes + Soft | O(K*N*TI*K_TI) | Best overall balance |
+| Multiscale Adaptive | Yes | Yes | Yes | No | Yes (multi-res) | O(K*N*TI*K_TI) | Multi-resolution + adaptive |
+
+Legend:
+- K = number of samples, N = H*W field size, TI = single TI size, K_TI = number of training images
+- "Soft" coverage = achieved through penalty mechanism rather than hard constraint
+- The three new methods (Penalized, Hybrid, Multiscale Adaptive) all support multi-TI probability estimation

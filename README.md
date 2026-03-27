@@ -2,12 +2,16 @@
 
 Information-theoretic framework for optimal spatial sampling design in binary random fields.
 
+![Architecture](docs/svg/architecture.svg)
+![AdSEMES Algorithm](docs/svg/adsemes_algorithm.svg)
+![Sampling Comparison](docs/svg/sampling_comparison.svg)
+
 ## Overview
 
 This application implements the AdSEMES (Adaptive Sequential Empirical Maximum Entropy Sampling) algorithm for optimal well placement in channelized geological reservoirs. It provides an interactive web interface for:
 
 - Generating synthetic binary fields (channelized, branching, random)
-- Comparing 6 sampling strategies (random, stratified, multiscale, oracle, adaptive)
+- Comparing 9 sampling strategies (random, stratified, multiscale, oracle, adaptive, penalized, hybrid, multiscale-adaptive)
 - Reconstructing fields from sparse samples (nearest neighbor, kriging, entropy-weighted)
 - Evaluating performance (SNR, accuracy, resolvability capacity)
 
@@ -30,7 +34,7 @@ app/
   main.py              FastAPI application (port 8008)
   simulation/          Core computation modules
     entropy.py         Shannon entropy computation
-    sampling.py        6 sampling schemes
+    sampling.py        9 sampling schemes
     field_generator.py Synthetic binary field generation
     inference.py       3 reconstruction methods
     pattern_matching.py Training Image pattern statistics

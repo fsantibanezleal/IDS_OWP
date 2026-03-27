@@ -485,6 +485,487 @@ def adaptive_entropy_sampling(
     return np.array(positions), entropy_history
 
 
+def _update_probability_field_multi_ti(
+    field: np.ndarray,
+    sampled_mask: np.ndarray,
+    training_images: list,
+    prob_field: np.ndarray,
+    si: int,
+    sj: int,
+    pattern_radius: int,
+) -> np.ndarray:
+    """Update probability estimates using multiple training images.
+
+    ===== MULTI-TI PROBABILITY ESTIMATION =====
+
+    Given K training images {TI_1, ..., TI_K}, the conditional
+    probability P(X_i = 1 | pattern) is estimated as the weighted
+    average across all TIs:
+
+        P(X_i = 1 | pattern) = (1/K) * Sigma_k P_k(X_i = 1 | pattern)
+
+    where P_k is the estimate from TI_k alone.
+
+    This reduces estimation variance by factor 1/K compared to
+    using a single TI, and captures geological uncertainty across
+    multiple equiprobable realizations.
+
+    For positions far from the newly sampled point (outside
+    2*pattern_radius), the probability field is not updated
+    (optimization: only update the affected neighborhood).
+
+    Args:
+        field: Current field state (H, W). NaN at unsampled positions.
+        sampled_mask: Boolean mask (H, W), True where sampled.
+        training_images: List of 2D binary training images.
+        prob_field: Current probability field (H, W).
+        si: Row index of the newly sampled point.
+        sj: Column index of the newly sampled point.
+        pattern_radius: Half-width of the conditioning neighborhood.
+
+    Returns:
+        Updated probability field (H, W).
+    """
+    from .pattern_matching import compute_conditional_probability_fast
+
+    H, W = field.shape
+    r = pattern_radius
+    update_radius = 2 * r
+
+    # Define the neighborhood to update around the new sample
+    i_start = max(0, si - update_radius)
+    i_end = min(H, si + update_radius + 1)
+    j_start = max(0, sj - update_radius)
+    j_end = min(W, sj + update_radius + 1)
+
+    new_prob = prob_field.copy()
+
+    for i in range(i_start, i_end):
+        for j in range(j_start, j_end):
+            if sampled_mask[i, j]:
+                new_prob[i, j] = field[i, j]
+                continue
+
+            # Extract local patch
+            pi_start = max(0, i - r)
+            pi_end = min(H, i + r + 1)
+            pj_start = max(0, j - r)
+            pj_end = min(W, j + r + 1)
+
+            local_mask = sampled_mask[pi_start:pi_end, pj_start:pj_end]
+            local_vals = field[pi_start:pi_end, pj_start:pj_end].copy()
+            local_vals[~local_mask] = 0.0
+
+            num_known = int(np.sum(local_mask))
+            if num_known < 1:
+                continue
+
+            # Center offset within the local patch
+            center_offset = (i - pi_start, j - pj_start)
+
+            # Average probability across all TIs
+            probs = []
+            for ti in training_images:
+                p = compute_conditional_probability_fast(
+                    ti, local_vals, local_mask, center_offset=center_offset
+                )
+                probs.append(p)
+
+            new_prob[i, j] = float(np.mean(probs))
+
+    return new_prob
+
+
+def penalized_adaptive_sampling(
+    field: np.ndarray,
+    training_images: list,
+    num_samples: int,
+    pattern_radius: int = 3,
+    penalty_radius: int = 5,
+    penalty_decay: float = 0.5,
+    seed: Optional[int] = None,
+) -> Tuple[np.ndarray, np.ndarray, List[float]]:
+    """Adaptive entropy sampling with local exploration penalty.
+
+    ===== THE LOCALITY PROBLEM =====
+
+    Standard AdSEMES greedily selects max-entropy positions. After
+    sampling a point, its immediate neighbors become the most
+    uncertain (they have the most conditioning data nearby). This
+    creates a clustering effect where samples concentrate in one
+    region rather than covering the field.
+
+    ===== SOLUTION: SPATIAL PENALTY =====
+
+    After placing sample k at position (i,j), we apply a Gaussian
+    penalty to the entropy map within a radius R:
+
+        H_penalized(i',j') = H(i',j') * (1 - alpha * exp(-d^2/(2R^2)))
+
+    where:
+        d = ||(i',j') - (i,j)||    (Euclidean distance)
+        alpha = penalty_decay in (0,1]   (penalty strength)
+        R = penalty_radius           (penalty extent in pixels)
+
+    This forces the next sample to be placed further away, improving
+    spatial coverage while still respecting the entropy landscape.
+
+    The penalty decays with subsequent samples (older penalties
+    weaken), allowing revisiting regions that become uncertain again
+    after distant samples reveal new information.
+
+    Args:
+        field: 2D binary field (H, W).
+        training_images: List of 2D binary training images.
+        num_samples: Number of samples to place.
+        pattern_radius: Half-width of conditioning neighborhood.
+        penalty_radius: Radius of suppression zone (pixels).
+        penalty_decay: Penalty strength in (0, 1].
+        seed: Random seed for tie-breaking.
+
+    Returns:
+        Tuple of (sampled_mask, sample_order, entropy_history):
+        - sampled_mask: Boolean array (H, W) of sampled positions.
+        - sample_order: Int array (H, W) with order of sampling (0 = unsampled).
+        - entropy_history: List of total penalized entropy at each step.
+    """
+    rng = np.random.RandomState(seed)
+    H, W = field.shape
+    sampled_mask = np.zeros((H, W), dtype=bool)
+    sample_order = np.zeros((H, W), dtype=int)
+    penalty_map = np.ones((H, W), dtype=np.float64)
+    entropy_history: List[float] = []
+
+    # Initialize NaN field for tracking revealed values
+    known_field = np.full((H, W), np.nan)
+
+    # Use multiple TIs for probability estimation
+    marginal_p = np.mean([np.mean(ti) for ti in training_images])
+    prob_field = np.full((H, W), marginal_p)
+
+    for k in range(1, num_samples + 1):
+        # Compute entropy with penalty
+        h_map = binary_entropy(prob_field) * penalty_map
+        h_map[sampled_mask] = 0.0
+
+        entropy_history.append(float(np.sum(h_map)))
+
+        # Select max penalized entropy position
+        free_mask = ~sampled_mask
+        if not np.any(free_mask):
+            break
+
+        h_map[~free_mask] = -1
+        # Break ties randomly
+        max_val = np.max(h_map)
+        candidates = np.argwhere(np.abs(h_map - max_val) < 1e-10)
+        idx = rng.randint(len(candidates))
+        si, sj = int(candidates[idx, 0]), int(candidates[idx, 1])
+
+        sampled_mask[si, sj] = True
+        sample_order[si, sj] = k
+        known_field[si, sj] = field[si, sj]
+
+        # Apply Gaussian penalty around new sample
+        r_ext = penalty_radius * 3
+        yi_start = max(0, si - r_ext)
+        yi_end = min(H, si + r_ext + 1)
+        xi_start = max(0, sj - r_ext)
+        xi_end = min(W, sj + r_ext + 1)
+
+        yi, xi = np.ogrid[yi_start:yi_end, xi_start:xi_end]
+        dist_sq = (yi - si) ** 2 + (xi - sj) ** 2
+        local_penalty = 1.0 - penalty_decay * np.exp(
+            -dist_sq / (2 * penalty_radius**2)
+        )
+
+        penalty_map[yi_start:yi_end, xi_start:xi_end] *= local_penalty
+
+        # Update probability field using pattern matching with multiple TIs
+        prob_field = _update_probability_field_multi_ti(
+            known_field, sampled_mask, training_images, prob_field,
+            si, sj, pattern_radius
+        )
+
+    return sampled_mask, sample_order, entropy_history
+
+
+def hybrid_stratified_adaptive_sampling(
+    field: np.ndarray,
+    training_images: list,
+    num_samples: int,
+    stratified_fraction: float = 0.3,
+    pattern_radius: int = 3,
+    penalty_radius: int = 5,
+    penalty_decay: float = 0.5,
+    seed: Optional[int] = None,
+) -> Tuple[np.ndarray, np.ndarray, List[float]]:
+    """Two-phase sampling: stratified seeding followed by adaptive refinement.
+
+    ===== RATIONALE =====
+
+    Pure adaptive sampling can miss entire regions if the initial
+    entropy landscape is uniform. Pure stratified sampling ignores
+    the information content of the field.
+
+    This hybrid combines both:
+
+    Phase 1 (Stratified Seeding):
+        Place floor(alpha*K) samples on a regular grid to ensure
+        minimum spatial coverage across the entire field.
+
+    Phase 2 (Adaptive Refinement):
+        Use the remaining ceil((1-alpha)*K) samples with penalized
+        AdSEMES, now benefiting from the seed samples that
+        provide conditioning data throughout the field.
+
+    The seed samples create a scaffold of conditioning information
+    that prevents the adaptive phase from becoming local.
+
+    Args:
+        field: 2D binary field.
+        training_images: List of training images.
+        num_samples: Total number of samples.
+        stratified_fraction: Fraction of samples for Phase 1 (0.2-0.5).
+        pattern_radius: Neighborhood size for entropy estimation.
+        penalty_radius: Radius of suppression zone (pixels).
+        penalty_decay: Penalty strength in (0, 1].
+        seed: Random seed.
+
+    Returns:
+        Tuple of (sampled_mask, sample_order, entropy_history):
+        - sampled_mask: Boolean array (H, W).
+        - sample_order: Int array (H, W) with sampling order.
+        - entropy_history: List of total entropy at each adaptive step.
+    """
+    rng = np.random.RandomState(seed)
+    H, W = field.shape
+    n_stratified = max(1, int(num_samples * stratified_fraction))
+    n_adaptive = num_samples - n_stratified
+
+    # Phase 1: Stratified seeding
+    strat_positions = stratified_sampling((H, W), n_stratified)
+    n_stratified = len(strat_positions)  # May differ slightly
+    n_adaptive = num_samples - n_stratified
+
+    sampled_mask = np.zeros((H, W), dtype=bool)
+    sample_order = np.zeros((H, W), dtype=int)
+    known_field = np.full((H, W), np.nan)
+
+    for k, pos in enumerate(strat_positions, start=1):
+        r, c = int(pos[0]), int(pos[1])
+        sampled_mask[r, c] = True
+        sample_order[r, c] = k
+        known_field[r, c] = field[r, c]
+
+    # Phase 2: Penalized adaptive refinement on top of stratified seeds
+    marginal_p = np.mean([np.mean(ti) for ti in training_images])
+    prob_field = np.full((H, W), marginal_p)
+    # Initialize prob_field from known samples
+    for pos in strat_positions:
+        r, c = int(pos[0]), int(pos[1])
+        prob_field[r, c] = field[r, c]
+
+    # Build initial probability field from all stratified observations
+    for pos in strat_positions:
+        r, c = int(pos[0]), int(pos[1])
+        prob_field = _update_probability_field_multi_ti(
+            known_field, sampled_mask, training_images, prob_field,
+            r, c, pattern_radius
+        )
+
+    penalty_map = np.ones((H, W), dtype=np.float64)
+    # Apply initial penalty at stratified positions
+    for pos in strat_positions:
+        si, sj = int(pos[0]), int(pos[1])
+        r_ext = penalty_radius * 3
+        yi_start = max(0, si - r_ext)
+        yi_end = min(H, si + r_ext + 1)
+        xi_start = max(0, sj - r_ext)
+        xi_end = min(W, sj + r_ext + 1)
+        yi, xi = np.ogrid[yi_start:yi_end, xi_start:xi_end]
+        dist_sq = (yi - si) ** 2 + (xi - sj) ** 2
+        local_penalty = 1.0 - penalty_decay * np.exp(
+            -dist_sq / (2 * penalty_radius**2)
+        )
+        penalty_map[yi_start:yi_end, xi_start:xi_end] *= local_penalty
+
+    entropy_history: List[float] = []
+    base_k = n_stratified
+
+    for k in range(1, n_adaptive + 1):
+        # Compute penalized entropy
+        h_map = binary_entropy(prob_field) * penalty_map
+        h_map[sampled_mask] = 0.0
+
+        entropy_history.append(float(np.sum(h_map)))
+
+        free_mask = ~sampled_mask
+        if not np.any(free_mask):
+            break
+
+        h_map[~free_mask] = -1
+        max_val = np.max(h_map)
+        candidates = np.argwhere(np.abs(h_map - max_val) < 1e-10)
+        idx = rng.randint(len(candidates))
+        si, sj = int(candidates[idx, 0]), int(candidates[idx, 1])
+
+        sampled_mask[si, sj] = True
+        sample_order[si, sj] = base_k + k
+        known_field[si, sj] = field[si, sj]
+
+        # Apply Gaussian penalty
+        r_ext = penalty_radius * 3
+        yi_start = max(0, si - r_ext)
+        yi_end = min(H, si + r_ext + 1)
+        xi_start = max(0, sj - r_ext)
+        xi_end = min(W, sj + r_ext + 1)
+        yi, xi = np.ogrid[yi_start:yi_end, xi_start:xi_end]
+        dist_sq = (yi - si) ** 2 + (xi - sj) ** 2
+        local_penalty = 1.0 - penalty_decay * np.exp(
+            -dist_sq / (2 * penalty_radius**2)
+        )
+        penalty_map[yi_start:yi_end, xi_start:xi_end] *= local_penalty
+
+        # Update probability field
+        prob_field = _update_probability_field_multi_ti(
+            known_field, sampled_mask, training_images, prob_field,
+            si, sj, pattern_radius
+        )
+
+    return sampled_mask, sample_order, entropy_history
+
+
+def multiscale_adaptive_sampling(
+    field: np.ndarray,
+    training_images: list,
+    num_samples: int,
+    n_scales: int = 3,
+    pattern_radius: int = 3,
+    seed: Optional[int] = None,
+) -> Tuple[np.ndarray, np.ndarray, List[float]]:
+    """Multi-resolution adaptive sampling.
+
+    ===== MULTI-SCALE APPROACH =====
+
+    Operates at decreasing spatial scales: coarse grid first, then
+    progressively finer resolution, using entropy at each scale
+    to guide placement. This inherently avoids the locality problem
+    because each scale has a minimum spacing constraint.
+
+    Scale allocation:
+        - Scale 0 (coarsest): ~25% of budget, spacing = field_size / 2
+        - Scale 1 (medium):   ~35% of budget, spacing = field_size / 4
+        - Scale 2 (finest):   ~40% of budget, entropy-guided at full resolution
+
+    At each scale, candidates are restricted to a sub-grid with the
+    appropriate spacing. Among candidates, the one with highest estimated
+    entropy is selected, ensuring information-driven placement at every scale.
+
+    Args:
+        field: 2D binary field (H, W).
+        training_images: List of 2D binary training images.
+        num_samples: Total number of samples.
+        n_scales: Number of resolution scales (default 3).
+        pattern_radius: Neighborhood size for entropy estimation.
+        seed: Random seed.
+
+    Returns:
+        Tuple of (sampled_mask, sample_order, entropy_history):
+        - sampled_mask: Boolean array (H, W).
+        - sample_order: Int array (H, W) with sampling order.
+        - entropy_history: List of total entropy per sample placed.
+    """
+    rng = np.random.RandomState(seed)
+    H, W = field.shape
+    sampled_mask = np.zeros((H, W), dtype=bool)
+    sample_order = np.zeros((H, W), dtype=int)
+    known_field = np.full((H, W), np.nan)
+    entropy_history: List[float] = []
+
+    marginal_p = np.mean([np.mean(ti) for ti in training_images])
+    prob_field = np.full((H, W), marginal_p)
+
+    # Allocate samples to scales (more at finer scales)
+    weights = np.array([1.0 + i for i in range(n_scales)])
+    weights /= weights.sum()
+    counts = (weights * num_samples).astype(int)
+    counts[-1] = num_samples - counts[:-1].sum()
+
+    sample_k = 0
+
+    for scale in range(n_scales):
+        n_this_scale = int(counts[scale])
+        if n_this_scale <= 0:
+            continue
+
+        # Compute grid spacing for this scale
+        # Coarser scales have larger spacing
+        scale_factor = 2 ** (n_scales - scale - 1)
+        row_step = max(1, H // (2 * scale_factor))
+        col_step = max(1, W // (2 * scale_factor))
+
+        if scale < n_scales - 1:
+            # Coarser scales: candidates on sub-grid
+            candidate_rows = list(range(row_step // 2, H, row_step))
+            candidate_cols = list(range(col_step // 2, W, col_step))
+            candidates_set = [
+                (r, c) for r in candidate_rows for c in candidate_cols
+                if not sampled_mask[r, c]
+            ]
+        else:
+            # Finest scale: all unsampled positions are candidates
+            candidates_set = [
+                (r, c) for r in range(H) for c in range(W)
+                if not sampled_mask[r, c]
+            ]
+
+        for _ in range(n_this_scale):
+            if not candidates_set:
+                break
+
+            # Compute entropy at candidate positions
+            h_map = binary_entropy(prob_field)
+            h_map[sampled_mask] = 0.0
+
+            best_h = -1.0
+            best_candidates = []
+            for (cr, cc) in candidates_set:
+                h_val = h_map[cr, cc]
+                if h_val > best_h + 1e-10:
+                    best_h = h_val
+                    best_candidates = [(cr, cc)]
+                elif abs(h_val - best_h) < 1e-10:
+                    best_candidates.append((cr, cc))
+
+            if best_h <= 0:
+                break
+
+            idx = rng.randint(len(best_candidates))
+            si, sj = best_candidates[idx]
+
+            sample_k += 1
+            sampled_mask[si, sj] = True
+            sample_order[si, sj] = sample_k
+            known_field[si, sj] = field[si, sj]
+
+            entropy_history.append(float(np.sum(h_map)))
+
+            # Update probability field
+            prob_field = _update_probability_field_multi_ti(
+                known_field, sampled_mask, training_images, prob_field,
+                si, sj, pattern_radius
+            )
+
+            # Remove from candidates
+            candidates_set = [
+                (r, c) for (r, c) in candidates_set
+                if not sampled_mask[r, c]
+            ]
+
+    return sampled_mask, sample_order, entropy_history
+
+
 def apply_sampling(
     true_field: np.ndarray,
     positions: np.ndarray,

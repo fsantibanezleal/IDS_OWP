@@ -17,9 +17,16 @@ from app.simulation.sampling import (
     random_stratified_sampling,
     multiscale_stratified_sampling,
     oracle_entropy_sampling,
+    penalized_adaptive_sampling,
+    hybrid_stratified_adaptive_sampling,
+    multiscale_adaptive_sampling,
     apply_sampling,
 )
-from app.simulation.field_generator import generate_multi_channel
+from app.simulation.field_generator import (
+    generate_multi_channel,
+    generate_random_field,
+    generate_training_ensemble,
+)
 
 
 FIELD_SHAPE = (32, 32)
@@ -108,6 +115,143 @@ def test_reproducibility():
     print("  [PASS] reproducibility")
 
 
+def test_penalized_adaptive_sampling():
+    """Penalized adaptive sampling achieves better coverage than plain adaptive."""
+    field = generate_random_field(FIELD_SHAPE, proportion=0.3, correlation_length=5, seed=42)
+    training_images = generate_training_ensemble(
+        field_type='random', n_realizations=3,
+        field_size=(48, 48), seed=100,
+    )
+
+    mask, order, entropy_hist = penalized_adaptive_sampling(
+        field, training_images, num_samples=10,
+        pattern_radius=2, penalty_radius=5, penalty_decay=0.5, seed=42,
+    )
+
+    # Check correct number of samples
+    num_placed = int(np.sum(mask))
+    assert num_placed == 10, f"Expected 10 samples, got {num_placed}"
+
+    # Check order is sequential 1..10
+    orders = order[mask]
+    assert set(orders) == set(range(1, 11)), f"Order values unexpected: {sorted(orders)}"
+
+    # Check entropy history has correct length
+    assert len(entropy_hist) == 10, f"Expected 10 entropy values, got {len(entropy_hist)}"
+
+    # Check spatial spread: compute pairwise distances
+    positions = np.argwhere(mask)
+    from scipy.spatial.distance import pdist
+    dists = pdist(positions)
+    min_dist = np.min(dists)
+    assert min_dist > 1.0, f"Samples too close together: min distance = {min_dist}"
+    print("  [PASS] penalized_adaptive_sampling")
+
+
+def test_hybrid_stratified_adaptive():
+    """Hybrid stratified+adaptive combines coverage with adaptation."""
+    field = generate_random_field(FIELD_SHAPE, proportion=0.3, correlation_length=5, seed=42)
+    training_images = generate_training_ensemble(
+        field_type='random', n_realizations=3,
+        field_size=(48, 48), seed=200,
+    )
+
+    mask, order, entropy_hist = hybrid_stratified_adaptive_sampling(
+        field, training_images, num_samples=15,
+        stratified_fraction=0.3, pattern_radius=2, seed=42,
+    )
+
+    num_placed = int(np.sum(mask))
+    assert num_placed == 15, f"Expected 15 samples, got {num_placed}"
+
+    # Check that stratified phase placed samples first (lower order numbers)
+    n_strat = max(1, int(15 * 0.3))
+    # Orders should go from 1 to num_placed
+    orders = sorted(order[mask])
+    assert orders[0] == 1, f"First order should be 1, got {orders[0]}"
+    assert orders[-1] == num_placed, f"Last order should be {num_placed}, got {orders[-1]}"
+
+    # All positions in bounds
+    positions = np.argwhere(mask)
+    assert np.all(positions[:, 0] >= 0) and np.all(positions[:, 0] < FIELD_SHAPE[0])
+    assert np.all(positions[:, 1] >= 0) and np.all(positions[:, 1] < FIELD_SHAPE[1])
+    print("  [PASS] hybrid_stratified_adaptive_sampling")
+
+
+def test_multiscale_adaptive():
+    """Multiscale adaptive samples at multiple resolutions."""
+    field = generate_random_field(FIELD_SHAPE, proportion=0.3, correlation_length=5, seed=42)
+    training_images = generate_training_ensemble(
+        field_type='random', n_realizations=3,
+        field_size=(48, 48), seed=300,
+    )
+
+    mask, order, entropy_hist = multiscale_adaptive_sampling(
+        field, training_images, num_samples=12,
+        n_scales=3, pattern_radius=2, seed=42,
+    )
+
+    num_placed = int(np.sum(mask))
+    assert num_placed == 12, f"Expected 12 samples, got {num_placed}"
+
+    # Check all positions unique and in bounds
+    positions = np.argwhere(mask)
+    assert len(positions) == 12
+    assert np.all(positions[:, 0] >= 0) and np.all(positions[:, 0] < FIELD_SHAPE[0])
+    assert np.all(positions[:, 1] >= 0) and np.all(positions[:, 1] < FIELD_SHAPE[1])
+
+    assert len(entropy_hist) == 12, f"Expected 12 entropy values, got {len(entropy_hist)}"
+    print("  [PASS] multiscale_adaptive_sampling")
+
+
+def test_multi_ti_probability():
+    """Multi-TI estimation uses multiple training images."""
+    from app.simulation.sampling import _update_probability_field_multi_ti
+
+    field = np.full((8, 8), np.nan)
+    field[4, 4] = 1.0
+    mask = np.zeros((8, 8), dtype=bool)
+    mask[4, 4] = True
+
+    training_images = generate_training_ensemble(
+        field_type='random', n_realizations=5,
+        field_size=(32, 32), seed=42,
+    )
+
+    # Initial uniform probability
+    prob_field = np.full((8, 8), 0.3)
+
+    updated = _update_probability_field_multi_ti(
+        field, mask, training_images, prob_field, 4, 4, pattern_radius=2,
+    )
+
+    # Updated field should differ from initial near the sample
+    assert not np.allclose(updated, prob_field), "Probability field should be updated"
+
+    # Sampled position should have the true value
+    assert abs(updated[4, 4] - 1.0) < 1e-10, f"Sampled position should have prob=1.0, got {updated[4, 4]}"
+
+    # All probabilities should be in [0, 1]
+    assert np.all(updated >= 0.0) and np.all(updated <= 1.0), "Probabilities must be in [0, 1]"
+    print("  [PASS] multi_ti_probability")
+
+
+def test_training_ensemble_generation():
+    """Training ensemble generates the right number of distinct TIs."""
+    ensemble = generate_training_ensemble(
+        field_type='random', n_realizations=5,
+        field_size=(32, 32), seed=42,
+    )
+    assert len(ensemble) == 5, f"Expected 5 TIs, got {len(ensemble)}"
+    for i, ti in enumerate(ensemble):
+        assert ti.shape == (32, 32), f"TI {i} has wrong shape: {ti.shape}"
+
+    # TIs should not all be identical
+    all_same = all(np.array_equal(ensemble[0], ti) for ti in ensemble[1:])
+    assert not all_same, "Training images should not all be identical"
+    print("  [PASS] training_ensemble_generation")
+
+
 if __name__ == '__main__':
     print("Running sampling tests...")
     test_random_uniform()
@@ -117,4 +261,9 @@ if __name__ == '__main__':
     test_oracle_entropy()
     test_apply_sampling()
     test_reproducibility()
+    test_penalized_adaptive_sampling()
+    test_hybrid_stratified_adaptive()
+    test_multiscale_adaptive()
+    test_multi_ti_probability()
+    test_training_ensemble_generation()
     print("\nAll sampling tests passed!")

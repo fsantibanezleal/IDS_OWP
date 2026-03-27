@@ -26,8 +26,12 @@ from ..simulation.sampling import (
     multiscale_stratified_sampling,
     oracle_entropy_sampling,
     adaptive_entropy_sampling,
+    penalized_adaptive_sampling,
+    hybrid_stratified_adaptive_sampling,
+    multiscale_adaptive_sampling,
     apply_sampling,
 )
+from ..simulation.field_generator import generate_training_ensemble
 from ..simulation.inference import reconstruct
 from ..simulation.entropy import entropy_map, total_field_entropy
 from ..simulation.metrics import compute_all_metrics
@@ -59,11 +63,13 @@ class SampleRequest(BaseModel):
         default="random_uniform",
         description=(
             "Sampling method: random_uniform, stratified, random_stratified, "
-            "multiscale_stratified, oracle_entropy, adaptive_entropy"
+            "multiscale_stratified, oracle_entropy, adaptive_entropy, "
+            "penalized_adaptive, hybrid_stratified_adaptive, multiscale_adaptive"
         ),
     )
     num_samples: int = Field(default=20, ge=1, le=1000)
     pattern_radius: int = Field(default=3, ge=1, le=10)
+    num_training_images: int = Field(default=5, ge=1, le=20)
     seed: Optional[int] = None
 
 
@@ -208,6 +214,36 @@ async def sample_endpoint(req: SampleRequest) -> Dict[str, Any]:
             true_field, training_image, req.num_samples,
             pattern_radius=req.pattern_radius, seed=req.seed,
         )
+    elif method in ("penalized_adaptive", "hybrid_stratified_adaptive", "multiscale_adaptive"):
+        # Generate training ensemble for multi-TI methods
+        ti_seed = (req.seed + 2000) if req.seed is not None else None
+        training_ensemble = generate_training_ensemble(
+            field_type=_state["field_type"] or "multi_channel",
+            n_realizations=req.num_training_images,
+            field_size=training_image.shape,
+            seed=ti_seed,
+        )
+        if method == "penalized_adaptive":
+            mask, order, ent_hist = penalized_adaptive_sampling(
+                true_field, training_ensemble, req.num_samples,
+                pattern_radius=req.pattern_radius, seed=req.seed,
+            )
+        elif method == "hybrid_stratified_adaptive":
+            mask, order, ent_hist = hybrid_stratified_adaptive_sampling(
+                true_field, training_ensemble, req.num_samples,
+                pattern_radius=req.pattern_radius, seed=req.seed,
+            )
+        else:  # multiscale_adaptive
+            mask, order, ent_hist = multiscale_adaptive_sampling(
+                true_field, training_ensemble, req.num_samples,
+                pattern_radius=req.pattern_radius, seed=req.seed,
+            )
+        # Convert mask+order to positions array (sorted by order)
+        sampled_positions = np.argwhere(mask)
+        orders = np.array([order[r, c] for r, c in sampled_positions])
+        sort_idx = np.argsort(orders)
+        positions = sampled_positions[sort_idx]
+        entropy_history = None  # These methods track total entropy differently
     else:
         return {"status": "error", "message": f"Unknown sampling method: {method}"}
 

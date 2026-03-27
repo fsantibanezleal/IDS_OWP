@@ -48,6 +48,9 @@
                     <option value="multiscale_stratified">Multiscale Stratified</option>
                     <option value="oracle_entropy">Oracle Entropy (Upper Bound)</option>
                     <option value="adaptive_entropy">Adaptive Entropy (AdSEMES)</option>
+                    <option value="penalized_adaptive">Penalized Adaptive (AdSEMES + Penalty)</option>
+                    <option value="hybrid_stratified_adaptive">Hybrid Stratified + Adaptive</option>
+                    <option value="multiscale_adaptive">Multiscale Adaptive</option>
                 </select>
             </div>
 
@@ -61,6 +64,12 @@
                 <label for="patternRadius">Pattern Radius:</label>
                 <input type="range" id="patternRadius" min="1" max="8" value="3">
                 <span id="patternRadiusValue">3</span>
+            </div>
+
+            <div class="control-group">
+                <label for="numTrainingImages">Training Images:</label>
+                <input type="range" id="numTrainingImages" min="1" max="20" value="5">
+                <span id="numTrainingImagesValue">5</span>
             </div>
 
             <div class="control-group">
@@ -156,6 +165,9 @@
                 <li><strong>Multiscale:</strong> Hierarchical multi-resolution.</li>
                 <li><strong>Oracle Entropy:</strong> Uses true field (upper bound).</li>
                 <li><strong>Adaptive Entropy:</strong> AdSEMES (the main algorithm).</li>
+                <li><strong>Penalized Adaptive:</strong> AdSEMES with spatial penalty to avoid locality clustering.</li>
+                <li><strong>Hybrid Stratified + Adaptive:</strong> Stratified seeding + penalized adaptive refinement.</li>
+                <li><strong>Multiscale Adaptive:</strong> Multi-resolution entropy-guided sampling.</li>
             </ul>
 
             <h3>References</h3>
