@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OWP - Optimal Well Placement</title>
+    <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+    <header>
+        <h1>Optimal Well Placement (OWP)</h1>
+        <p class="subtitle">Information-Theoretic Framework for Spatial Sampling Design</p>
+        <button id="helpBtn" class="btn btn-info">? Help</button>
+    </header>
+
+    <main>
+        <!-- Controls Panel -->
+        <section id="controls" class="panel">
+            <h2>Configuration</h2>
+
+            <div class="control-group">
+                <label for="fieldType">Field Type:</label>
+                <select id="fieldType">
+                    <option value="single_channel">Single Channel</option>
+                    <option value="multi_channel" selected>Multi-Channel</option>
+                    <option value="branching">Branching</option>
+                    <option value="random">Random Correlated</option>
+                </select>
+            </div>
+
+            <div class="control-group">
+                <label for="fieldSize">Field Size:</label>
+                <select id="fieldSize">
+                    <option value="16">16 x 16</option>
+                    <option value="24">24 x 24</option>
+                    <option value="32" selected>32 x 32</option>
+                    <option value="48">48 x 48</option>
+                    <option value="64">64 x 64</option>
+                </select>
+            </div>
+
+            <div class="control-group">
+                <label for="samplingMethod">Sampling Method:</label>
+                <select id="samplingMethod">
+                    <option value="random_uniform">Random Uniform</option>
+                    <option value="stratified">Stratified Grid</option>
+                    <option value="random_stratified">Random Stratified</option>
+                    <option value="multiscale_stratified">Multiscale Stratified</option>
+                    <option value="oracle_entropy">Oracle Entropy (Upper Bound)</option>
+                    <option value="adaptive_entropy">Adaptive Entropy (AdSEMES)</option>
+                    <option value="penalized_adaptive">Penalized Adaptive (AdSEMES + Penalty)</option>
+                    <option value="hybrid_stratified_adaptive">Hybrid Stratified + Adaptive</option>
+                    <option value="multiscale_adaptive">Multiscale Adaptive</option>
+                </select>
+            </div>
+
+            <div class="control-group">
+                <label for="numSamples">Number of Samples:</label>
+                <input type="range" id="numSamples" min="5" max="200" value="20">
+                <span id="numSamplesValue">20</span>
+            </div>
+
+            <div class="control-group">
+                <label for="patternRadius">Pattern Radius:</label>
+                <input type="range" id="patternRadius" min="1" max="8" value="3">
+                <span id="patternRadiusValue">3</span>
+            </div>
+
+            <div class="control-group">
+                <label for="numTrainingImages">Training Images:</label>
+                <input type="range" id="numTrainingImages" min="1" max="20" value="5">
+                <span id="numTrainingImagesValue">5</span>
+            </div>
+
+            <div class="control-group">
+                <label for="reconMethod">Reconstruction:</label>
+                <select id="reconMethod">
+                    <option value="nearest">Nearest Neighbor</option>
+                    <option value="kriging" selected>Indicator Kriging</option>
+                    <option value="entropy_weighted">Entropy-Weighted IDW</option>
+                </select>
+            </div>
+
+            <div class="button-group">
+                <button id="generateBtn" class="btn btn-primary">Generate Field</button>
+                <button id="sampleBtn" class="btn btn-secondary" disabled>Sample</button>
+                <button id="inferBtn" class="btn btn-secondary" disabled>Reconstruct</button>
+                <button id="revealBtn" class="btn btn-accent" disabled>Reveal True Field</button>
+            </div>
+
+            <div id="status" class="status-bar">Ready. Generate a field to begin.</div>
+        </section>
+
+        <!-- Visualization Grid -->
+        <section id="visualizations" class="grid-container">
+            <div class="grid-item">
+                <h3>Training Image</h3>
+                <canvas id="canvasTI" width="256" height="256"></canvas>
+            </div>
+            <div class="grid-item">
+                <h3>Sampled Positions</h3>
+                <canvas id="canvasSampled" width="256" height="256"></canvas>
+            </div>
+            <div class="grid-item">
+                <h3>Entropy Map</h3>
+                <canvas id="canvasEntropy" width="256" height="256"></canvas>
+            </div>
+            <div class="grid-item">
+                <h3>Reconstructed Field</h3>
+                <canvas id="canvasRecon" width="256" height="256"></canvas>
+            </div>
+            <div class="grid-item">
+                <h3 id="trueFieldTitle">True Field (Hidden)</h3>
+                <canvas id="canvasTrue" width="256" height="256"></canvas>
+            </div>
+            <div class="grid-item">
+                <h3>Performance Metrics</h3>
+                <div id="metricsPanel" class="metrics-content">
+                    <p class="placeholder">Run sampling and reconstruction to see metrics.</p>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <!-- Help Modal -->
+    <div id="helpModal" class="modal hidden">
+        <div class="modal-content">
+            <span class="close-btn" id="closeHelp">&times;</span>
+            <h2>Information-Theoretic Framework for OWP</h2>
+
+            <h3>Problem</h3>
+            <p>Given a 2D binary random field (e.g., sand/shale reservoir),
+            select K measurement positions (wells) that maximize information
+            about the entire field.</p>
+
+            <h3>Shannon Entropy</h3>
+            <p>Binary entropy: <code>H(p) = -p log2(p) - (1-p) log2(1-p)</code></p>
+            <p>Measures uncertainty at each position. Maximum at p=0.5 (1 bit).</p>
+
+            <h3>Optimal Placement</h3>
+            <p><code>f* = argmax H(X_f)</code></p>
+            <p>Select positions that maximize the joint entropy of measurements,
+            equivalently minimizing posterior uncertainty.</p>
+
+            <h3>AdSEMES Algorithm</h3>
+            <p>Adaptive Sequential Empirical Maximum Entropy Sampling:</p>
+            <ol>
+                <li>Estimate conditional entropy at all unsampled positions using
+                    pattern matching against the Training Image.</li>
+                <li>Select the position with maximum entropy.</li>
+                <li>Reveal the true value (drill the well).</li>
+                <li>Repeat K times.</li>
+            </ol>
+            <p>Greedy with (1 - 1/e) approximation guarantee (submodular optimization).</p>
+
+            <h3>Resolvability Capacity</h3>
+            <p><code>C_k = (H_0 - H_k) / H_0</code></p>
+            <p>Fraction of total uncertainty resolved after k measurements. Ranges from 0 to 1.</p>
+
+            <h3>Sampling Methods</h3>
+            <ul>
+                <li><strong>Random Uniform:</strong> Baseline, no spatial structure.</li>
+                <li><strong>Stratified Grid:</strong> Deterministic uniform coverage.</li>
+                <li><strong>Random Stratified:</strong> Randomized within strata.</li>
+                <li><strong>Multiscale:</strong> Hierarchical multi-resolution.</li>
+                <li><strong>Oracle Entropy:</strong> Uses true field (upper bound).</li>
+                <li><strong>Adaptive Entropy:</strong> AdSEMES (the main algorithm).</li>
+                <li><strong>Penalized Adaptive:</strong> AdSEMES with spatial penalty to avoid locality clustering.</li>
+                <li><strong>Hybrid Stratified + Adaptive:</strong> Stratified seeding + penalized adaptive refinement.</li>
+                <li><strong>Multiscale Adaptive:</strong> Multi-resolution entropy-guided sampling.</li>
+            </ul>
+
+            <h3>References</h3>
+            <p>Shannon (1948); Cover & Thomas (2006); Silva et al., Fondecyt 1140840;
+            Nemhauser, Wolsey & Fisher (1978)</p>
+        </div>
+    </div>
+
+    <script src="/js/renderer.js"></script>
+    <script src="/js/websocket.js"></script>
+    <script src="/js/app.js"></script>
+</body>
+</html>

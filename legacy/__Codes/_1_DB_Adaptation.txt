@@ -1,0 +1,6 @@
+Perform transformation on DB in order to provide:
+
+TI = Binary image
+RI = Binary image
+
+Save images as .mat , .png, and geostatistics friendly formats (.sgems, .gslib)
