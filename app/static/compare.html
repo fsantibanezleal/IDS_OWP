@@ -4,266 +4,253 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>OWP - Parallel Method Comparison</title>
-    <link rel="stylesheet" href="/css/style.css">
     <style>
-        .compare-controls {
-            display: flex; gap: 12px; align-items: center;
-            padding: 12px; background: #1e1e2e; border-radius: 8px; margin-bottom: 16px;
-            flex-wrap: wrap;
-        }
-        .compare-controls label { color: #cdd6f4; font-size: 14px; }
-        .compare-controls select, .compare-controls input {
-            padding: 4px 8px; border-radius: 4px; border: 1px solid #45475a;
-            background: #313244; color: #cdd6f4;
-        }
-        .compare-grid {
-            display: grid; gap: 8px; overflow-x: auto;
-        }
-        .compare-row {
-            display: flex; gap: 8px; align-items: flex-start;
-        }
-        .compare-row .row-label {
-            min-width: 120px; padding-top: 8px; font-weight: bold;
-            color: #cdd6f4; font-size: 13px;
-        }
-        .compare-cell {
-            text-align: center; min-width: 180px;
-        }
-        .compare-cell canvas {
-            border: 1px solid #45475a; border-radius: 4px;
-            image-rendering: pixelated;
-        }
-        .compare-cell h4 {
-            margin: 4px 0; color: #cdd6f4; font-size: 12px;
-        }
-        .method-metrics {
-            font-size: 11px; color: #a6adc8; text-align: left;
-            padding: 4px 8px; background: #1e1e2e; border-radius: 4px;
-            min-height: 60px;
-        }
-        .step-indicator {
-            font-size: 13px; color: #f9e2af; margin-left: auto;
-        }
-        #referenceRow { margin-bottom: 8px; }
-        a.back-link { color: #89b4fa; text-decoration: none; margin-left: 16px; }
+        :root { --bg:#1e1e2e; --bg2:#313244; --border:#45475a; --text:#cdd6f4; --dim:#a6adc8; --accent:#89b4fa; --yellow:#f9e2af; --green:#a6e3a1; }
+        * { margin:0; padding:0; box-sizing:border-box; }
+        body { font-family:-apple-system,sans-serif; background:#11111b; color:var(--text); }
+        header { display:flex; align-items:center; gap:16px; padding:12px 20px; background:var(--bg); border-bottom:1px solid var(--border); }
+        header h1 { font-size:18px; }
+        header a { color:var(--accent); text-decoration:none; font-size:13px; }
+        main { padding:12px 20px; }
+
+        /* Controls bar */
+        .controls { display:flex; gap:10px; align-items:center; flex-wrap:wrap; padding:10px 14px; background:var(--bg); border-radius:8px; margin-bottom:12px; }
+        .controls label { font-size:12px; color:var(--dim); display:flex; align-items:center; gap:4px; }
+        .controls select, .controls input { padding:3px 6px; border-radius:4px; border:1px solid var(--border); background:var(--bg2); color:var(--text); font-size:12px; }
+        .controls button { padding:6px 14px; border:none; border-radius:5px; background:var(--accent); color:#000; font-weight:600; cursor:pointer; font-size:12px; }
+        .controls button:disabled { opacity:0.5; cursor:not-allowed; }
+        .step-info { font-size:13px; color:var(--yellow); margin-left:auto; }
+
+        /* Reference row */
+        .ref-row { display:flex; gap:10px; align-items:flex-start; margin-bottom:14px; }
+        .ref-cell { text-align:center; }
+        .ref-cell h4 { font-size:11px; color:var(--dim); margin-bottom:3px; }
+        .ref-cell canvas { border:1px solid var(--border); border-radius:4px; image-rendering:pixelated; }
+
+        /* Comparison grid: rows of metrics, columns of methods */
+        .section-label { font-size:13px; font-weight:700; color:var(--accent); padding:8px 0 4px; border-bottom:1px solid var(--border); margin-bottom:6px; }
+        .method-grid { display:grid; gap:6px; margin-bottom:14px; }
+        .method-cell { text-align:center; }
+        .method-cell h4 { font-size:11px; color:var(--dim); margin-bottom:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+        .method-cell canvas { border:1px solid var(--border); border-radius:3px; image-rendering:pixelated; width:100%; aspect-ratio:1; }
+        .metrics-text { font-size:10px; color:var(--dim); padding:3px; background:var(--bg); border-radius:3px; min-height:30px; line-height:1.4; }
     </style>
 </head>
 <body>
     <header>
-        <h1>OWP - Parallel Method Comparison</h1>
-        <p class="subtitle">Compare sampling methods side-by-side</p>
-        <a href="/" class="back-link">Back to main</a>
+        <h1>OWP — Parallel Method Comparison</h1>
+        <a href="/">← Back to main</a>
     </header>
-
     <main>
         <!-- Controls -->
-        <div class="compare-controls">
-            <label>Field Type:
-                <select id="fieldType">
-                    <option value="single_channel">Single Channel</option>
-                    <option value="multi_channel" selected>Multi-Channel</option>
-                    <option value="branching">Branching</option>
-                    <option value="random">Random Correlated</option>
-                    <option value="porphyry">Porphyry</option>
-                    <option value="veins">Veins</option>
-                    <option value="faulted">Faulted</option>
-                    <option value="folded">Folded</option>
-                    <option value="disseminated">Disseminated</option>
-                </select>
-            </label>
-            <label>Size:
-                <select id="fieldSize">
-                    <option value="16">16</option>
-                    <option value="24">24</option>
-                    <option value="32" selected>32</option>
-                </select>
-            </label>
-            <label>Samples:
-                <input type="number" id="numSamples" value="15" min="3" max="100">
-            </label>
-            <label>Methods:
-                <select id="methodSelect" multiple size="4" style="min-width:200px">
-                    <option value="random_uniform" selected>Random Uniform</option>
-                    <option value="stratified" selected>Stratified Grid</option>
-                    <option value="adaptive_entropy" selected>Adaptive Entropy</option>
-                    <option value="penalized_adaptive">Penalized Adaptive</option>
-                    <option value="multiscale_stratified">Multiscale Stratified</option>
-                    <option value="oracle_entropy">Oracle Entropy</option>
-                </select>
-            </label>
-            <button id="startBtn" class="btn btn-primary">Start Comparison</button>
-            <span id="stepIndicator" class="step-indicator"></span>
+        <div class="controls">
+            <label>Field: <select id="fieldType">
+                <option value="single_channel">Single Channel</option>
+                <option value="multi_channel" selected>Multi-Channel</option>
+                <option value="branching">Branching</option>
+                <option value="random">Random</option>
+                <option value="porphyry">Porphyry</option>
+                <option value="veins">Veins</option>
+                <option value="faulted">Faulted</option>
+                <option value="folded">Folded</option>
+                <option value="disseminated">Disseminated</option>
+            </select></label>
+            <label>Size: <select id="fieldSize">
+                <option value="16">16</option>
+                <option value="24">24</option>
+                <option value="32" selected>32</option>
+            </select></label>
+            <label>Samples: <input type="number" id="numSamples" value="20" min="3" max="100" style="width:50px"></label>
+            <label>Speed (ms): <input type="range" id="animSpeed" min="50" max="1000" value="200" style="width:100px"><span id="speedVal">200</span></label>
+            <label>Methods: <select id="methodSelect" multiple size="3" style="min-width:180px;font-size:11px">
+                <option value="random_uniform" selected>Random Uniform</option>
+                <option value="stratified" selected>Stratified Grid</option>
+                <option value="adaptive_entropy" selected>Adaptive Entropy</option>
+                <option value="penalized_adaptive" selected>Penalized Adaptive</option>
+                <option value="multiscale_stratified">Multiscale</option>
+                <option value="oracle_entropy">Oracle</option>
+            </select></label>
+            <button id="startBtn">▶ Run Comparison</button>
+            <button id="stopBtn" disabled>■ Stop</button>
+            <span id="stepInfo" class="step-info"></span>
         </div>
 
-        <!-- Row 1: Reference -->
-        <div class="compare-row" id="referenceRow">
-            <div class="compare-cell">
-                <h4>Training Image</h4>
-                <canvas id="canvasRefTI" width="180" height="180"></canvas>
-            </div>
-            <div class="compare-cell">
-                <h4>True Field</h4>
-                <canvas id="canvasRefTrue" width="180" height="180"></canvas>
-            </div>
+        <!-- Reference images (always visible) -->
+        <div class="ref-row">
+            <div class="ref-cell"><h4>Training Image</h4><canvas id="cvRefTI" width="140" height="140"></canvas></div>
+            <div class="ref-cell"><h4>True Field</h4><canvas id="cvRefTrue" width="140" height="140"></canvas></div>
         </div>
 
-        <!-- Dynamic rows -->
-        <div id="sampledRow" class="compare-row"></div>
-        <div id="entropyRow" class="compare-row"></div>
-        <div id="reconRow" class="compare-row"></div>
-        <div id="metricsRow" class="compare-row"></div>
+        <!-- Row: Sampled Positions -->
+        <div class="section-label">Sampled Positions</div>
+        <div class="method-grid" id="rowSampled"></div>
+
+        <!-- Row: Entropy Maps -->
+        <div class="section-label">Remaining Entropy</div>
+        <div class="method-grid" id="rowEntropy"></div>
+
+        <!-- Row: Reconstructions -->
+        <div class="section-label">Reconstruction</div>
+        <div class="method-grid" id="rowRecon"></div>
+
+        <!-- Row: Metrics -->
+        <div class="section-label">Statistics</div>
+        <div class="method-grid" id="rowMetrics"></div>
     </main>
 
-    <script src="/js/renderer.js"></script>
-    <script>
-    (function() {
-        'use strict';
+<script>
+(function(){
+    'use strict';
 
-        const startBtn = document.getElementById('startBtn');
-        const stepIndicator = document.getElementById('stepIndicator');
-        let animFrameId = null;
+    const $=id=>document.getElementById(id);
+    const startBtn=$('startBtn'), stopBtn=$('stopBtn'), stepInfo=$('stepInfo');
+    let running=false, stopRequested=false;
 
-        startBtn.addEventListener('click', runComparison);
+    $('animSpeed').addEventListener('input', function(){ $('speedVal').textContent=this.value; });
 
-        async function apiCall(endpoint, body) {
-            const resp = await fetch(endpoint, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(body),
-            });
-            return await resp.json();
-        }
+    startBtn.addEventListener('click', run);
+    stopBtn.addEventListener('click', ()=>{ stopRequested=true; });
 
-        async function runComparison() {
-            startBtn.disabled = true;
-            stepIndicator.textContent = 'Generating field...';
-
-            const size = parseInt(document.getElementById('fieldSize').value);
-            const numSamples = parseInt(document.getElementById('numSamples').value);
-            const fieldType = document.getElementById('fieldType').value;
-            const methodSelect = document.getElementById('methodSelect');
-            const methods = Array.from(methodSelect.selectedOptions).map(o => o.value);
-
-            if (methods.length === 0) {
-                stepIndicator.textContent = 'Select at least one method.';
-                startBtn.disabled = false;
-                return;
-            }
-
-            const seed = Math.floor(Math.random() * 100000);
-            const tiSize = Math.min(size * 2, 128);
-
-            // Generate field
-            const genResult = await apiCall('/api/generate', {
-                field_type: fieldType,
-                field_height: size, field_width: size,
-                ti_height: tiSize, ti_width: tiSize,
-                seed: seed,
-            });
-
-            if (genResult.status !== 'ok') {
-                stepIndicator.textContent = 'Generation failed.';
-                startBtn.disabled = false;
-                return;
-            }
-
-            // Render reference images
-            Renderer.renderField('canvasRefTI', genResult.training_image);
-
-            // Setup columns
-            const sampledRow = document.getElementById('sampledRow');
-            const entropyRow = document.getElementById('entropyRow');
-            const reconRow = document.getElementById('reconRow');
-            const metricsRow = document.getElementById('metricsRow');
-
-            sampledRow.innerHTML = '<div class="row-label">Sampled</div>';
-            entropyRow.innerHTML = '<div class="row-label">Entropy</div>';
-            reconRow.innerHTML = '<div class="row-label">Reconstruction</div>';
-            metricsRow.innerHTML = '<div class="row-label">Metrics</div>';
-
-            methods.forEach(m => {
-                const label = m.replace(/_/g, ' ');
-                ['sampled', 'entropy', 'recon', 'metrics'].forEach(rowType => {
-                    const row = document.getElementById(rowType + 'Row');
-                    const cell = document.createElement('div');
-                    cell.className = 'compare-cell';
-                    cell.id = `${rowType}-${m}`;
-                    if (rowType === 'metrics') {
-                        cell.innerHTML = `<h4>${label}</h4><div class="method-metrics" id="metrics-text-${m}">...</div>`;
+    // Simple canvas renderer for 2D arrays
+    function drawField(canvasId, data, colormap) {
+        const cv = $(canvasId);
+        if (!cv || !data || !data.length) return;
+        const ctx = cv.getContext('2d');
+        const H = data.length, W = data[0].length;
+        cv.width = W; cv.height = H;
+        const img = ctx.createImageData(W, H);
+        for (let r=0; r<H; r++) {
+            for (let c=0; c<W; c++) {
+                const idx = (r*W+c)*4;
+                const v = data[r][c];
+                if (colormap === 'entropy') {
+                    // Blue (low) → Red (high)
+                    const t = Math.min(1, Math.max(0, v));
+                    img.data[idx]   = Math.round(t * 255);
+                    img.data[idx+1] = Math.round((1-Math.abs(t-0.5)*2) * 100);
+                    img.data[idx+2] = Math.round((1-t) * 255);
+                    img.data[idx+3] = 255;
+                } else if (colormap === 'prob') {
+                    const t = Math.min(1, Math.max(0, v));
+                    img.data[idx]   = Math.round(t * 200 + 30);
+                    img.data[idx+1] = Math.round(t * 200 + 30);
+                    img.data[idx+2] = Math.round(t * 50 + 30);
+                    img.data[idx+3] = 255;
+                } else {
+                    // Binary black/white or mask (green dots on black)
+                    if (colormap === 'mask') {
+                        img.data[idx]   = v ? 50  : 10;
+                        img.data[idx+1] = v ? 220 : 10;
+                        img.data[idx+2] = v ? 50  : 10;
                     } else {
-                        cell.innerHTML = `<h4>${label}</h4><canvas id="canvas-${rowType}-${m}" width="180" height="180"></canvas>`;
+                        const g = Math.round(v * 255);
+                        img.data[idx] = g; img.data[idx+1] = g; img.data[idx+2] = g;
                     }
-                    row.appendChild(cell);
-                });
+                    img.data[idx+3] = 255;
+                }
+            }
+        }
+        ctx.putImageData(img, 0, 0);
+    }
+
+    async function apiPost(path, body) {
+        const r = await fetch(path, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+        return r.json();
+    }
+
+    async function run() {
+        if (running) return;
+        running = true; stopRequested = false;
+        startBtn.disabled = true; stopBtn.disabled = false;
+        stepInfo.textContent = 'Generating field...';
+
+        const size = parseInt($('fieldSize').value);
+        const numSamples = parseInt($('numSamples').value);
+        const fieldType = $('fieldType').value;
+        const speed = parseInt($('animSpeed').value);
+        const methods = Array.from($('methodSelect').selectedOptions).map(o=>o.value);
+
+        if (!methods.length) { stepInfo.textContent='Select methods'; cleanup(); return; }
+
+        const seed = Math.floor(Math.random()*99999);
+        const tiSize = Math.min(size*2, 128);
+
+        // Generate field
+        const gen = await apiPost('/api/generate', {
+            field_type:fieldType, field_height:size, field_width:size,
+            ti_height:tiSize, ti_width:tiSize, seed:seed
+        });
+        if (gen.status !== 'ok') { stepInfo.textContent='Generation failed'; cleanup(); return; }
+
+        drawField('cvRefTI', gen.training_image);
+        // True field will come from first infer result
+
+        // Setup grid columns
+        const nMethods = methods.length;
+        const gridCols = `repeat(${nMethods}, 1fr)`;
+        for (const rowId of ['rowSampled','rowEntropy','rowRecon','rowMetrics']) {
+            const row = $(rowId);
+            row.style.gridTemplateColumns = gridCols;
+            row.innerHTML = '';
+        }
+
+        // Create cells for each method
+        methods.forEach((m, i) => {
+            const label = m.replace(/_/g,' ');
+            $('rowSampled').innerHTML += `<div class="method-cell"><h4>${label}</h4><canvas id="cv-s-${i}"></canvas></div>`;
+            $('rowEntropy').innerHTML += `<div class="method-cell"><h4>${label}</h4><canvas id="cv-e-${i}"></canvas></div>`;
+            $('rowRecon').innerHTML += `<div class="method-cell"><h4>${label}</h4><canvas id="cv-r-${i}"></canvas></div>`;
+            $('rowMetrics').innerHTML += `<div class="method-cell"><h4>${label}</h4><div class="metrics-text" id="mt-${i}">—</div></div>`;
+        });
+
+        // Show true field
+        const inferRes = await apiPost('/api/infer', {method:'kriging'});
+        if (inferRes.true_field) drawField('cvRefTrue', inferRes.true_field);
+
+        // Step-by-step: fetch ONE step at a time per method (non-blocking)
+        // First call (step=1) precomputes positions, subsequent calls are fast
+        stepInfo.textContent = 'Starting step-by-step...';
+
+        for (let step=1; step<=numSamples; step++) {
+            if (stopRequested) break;
+
+            stepInfo.textContent = `Step ${step} / ${numSamples}`;
+
+            // Fetch current step for ALL methods in parallel (each is fast)
+            const stepPromises = methods.map(m => apiPost('/api/process-step', {
+                method:m, step:step, num_samples:numSamples,
+                pattern_radius:3, num_training_images:5,
+                recon_method:'kriging', seed:seed+500
+            }));
+            const stepResults = await Promise.all(stepPromises);
+
+            // Render each method's result for this step
+            stepResults.forEach((frame, i) => {
+                if (frame.status !== 'ok') return;
+
+                drawField(`cv-s-${i}`, frame.mask, 'mask');
+                drawField(`cv-e-${i}`, frame.entropy_map, 'entropy');
+                drawField(`cv-r-${i}`, frame.reconstruction, 'prob');
+
+                const mt = frame.metrics;
+                if (mt) {
+                    const acc = mt.accuracy!==undefined ? (mt.accuracy*100).toFixed(1)+'%' : '?';
+                    const snr = mt.snr_db!==undefined ? mt.snr_db.toFixed(1)+'dB' : '?';
+                    const f1 = mt.cm_f1!==undefined ? (mt.cm_f1*100).toFixed(1)+'%' : '?';
+                    $(`mt-${i}`).innerHTML = `Acc:${acc} SNR:${snr} F1:${f1}`;
+                }
             });
 
-            // Fetch animated results for all methods in parallel
-            stepIndicator.textContent = 'Processing methods...';
-
-            const promises = methods.map(m =>
-                apiCall('/api/process-animated', {
-                    method: m,
-                    num_samples: numSamples,
-                    pattern_radius: 3,
-                    num_training_images: 5,
-                    recon_method: 'kriging',
-                    seed: seed + 500,
-                })
-            );
-
-            const allResults = await Promise.all(promises);
-
-            // Check for true field (get from infer endpoint)
-            const inferResult = await apiCall('/api/infer', { method: 'kriging' });
-            if (inferResult.true_field) {
-                Renderer.renderField('canvasRefTrue', inferResult.true_field);
-            }
-
-            // Animate step by step
-            const maxSteps = Math.max(...allResults.map(r => r.results ? r.results.length : 0));
-
-            let step = 0;
-            function animateStep() {
-                if (step >= maxSteps) {
-                    stepIndicator.textContent = `Complete (${maxSteps} steps)`;
-                    startBtn.disabled = false;
-                    return;
-                }
-
-                stepIndicator.textContent = `Step ${step + 1} / ${maxSteps}`;
-
-                methods.forEach((m, i) => {
-                    const res = allResults[i];
-                    if (!res.results || step >= res.results.length) return;
-                    const frame = res.results[step];
-
-                    // Sampled positions (mask)
-                    Renderer.renderField(`canvas-sampled-${m}`, frame.mask);
-
-                    // Entropy
-                    Renderer.renderField(`canvas-entropy-${m}`, frame.entropy_map, { colormap: 'entropy' });
-
-                    // Reconstruction
-                    Renderer.renderField(`canvas-recon-${m}`, frame.reconstruction, { colormap: 'probability' });
-
-                    // Metrics
-                    const mt = frame.metrics;
-                    const panel = document.getElementById(`metrics-text-${m}`);
-                    if (panel && mt) {
-                        const acc = mt.accuracy !== undefined ? (mt.accuracy * 100).toFixed(1) : '?';
-                        const snr = mt.snr_db !== undefined ? mt.snr_db.toFixed(1) : '?';
-                        const f1 = mt.cm_f1 !== undefined ? (mt.cm_f1 * 100).toFixed(1) : '?';
-                        panel.innerHTML = `Acc: ${acc}% | SNR: ${snr}dB | F1: ${f1}%`;
-                    }
-                });
-
-                step++;
-                setTimeout(animateStep, 300);
-            }
-
-            animateStep();
+            // Wait between steps (user-controlled speed)
+            await new Promise(r => setTimeout(r, parseInt($('animSpeed').value)));
         }
-    })();
-    </script>
+
+        stepInfo.textContent = stopRequested ? 'Stopped' : `Done (${numSamples} steps)`;
+        cleanup();
+    }
+
+    function cleanup() { running=false; startBtn.disabled=false; stopBtn.disabled=true; }
+})();
+</script>
 </body>
 </html>

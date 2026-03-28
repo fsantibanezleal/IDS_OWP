@@ -15,6 +15,16 @@ This application implements the AdSEMES (Adaptive Sequential Empirical Maximum E
 - Reconstructing fields from sparse samples (nearest neighbor, kriging, entropy-weighted)
 - Evaluating performance (SNR, accuracy, resolvability capacity)
 
+## Frontend
+
+![Frontend](docs/png/frontend.png)
+
+<video src="docs/video/Adaptive_sampling.mp4" controls width="100%"></video>
+
+### Video Demo
+
+[![OWP AdSEMES — YouTube Demo](https://img.youtube.com/vi/KnTyQgQcpCQ/0.jpg)](https://youtu.be/KnTyQgQcpCQ)
+
 ## Quick Start
 
 ```bash
