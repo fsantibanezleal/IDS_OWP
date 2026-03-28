@@ -21,6 +21,10 @@ This application implements the AdSEMES (Adaptive Sequential Empirical Maximum E
 
 <video src="docs/video/Adaptive_sampling.mp4" controls width="100%"></video>
 
+### Video Demo
+
+[![OWP AdSEMES — YouTube Demo](https://img.youtube.com/vi/KnTyQgQcpCQ/0.jpg)](https://youtu.be/KnTyQgQcpCQ)
+
 ## Quick Start
 
 ```bash
