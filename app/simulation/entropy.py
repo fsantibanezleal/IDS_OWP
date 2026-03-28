@@ -421,6 +421,8 @@ def mrf_conditional_entropy(
     field: np.ndarray,
     sampled_mask: np.ndarray,
     clique_radius: int = 1,
+    kernel: str = 'uniform',
+    gaussian_sigma: float = 1.0,
 ) -> np.ndarray:
     """Estimate conditional entropy using Markov Random Field cliques.
 
@@ -441,7 +443,7 @@ def mrf_conditional_entropy(
     With Laplace smoothing to avoid zero probabilities:
         P(X_i=1 | clique) = (count(1) + alpha) / (count + 2*alpha)
 
-    Implementation is fully vectorized using scipy.ndimage.uniform_filter
+    Implementation is fully vectorized using scipy.ndimage filters
     to compute neighborhood sums via convolution, achieving O(H*W) complexity
     independent of clique radius (no Python loops over pixels).
 
@@ -452,12 +454,15 @@ def mrf_conditional_entropy(
             been sampled (value is known).
         clique_radius: Half-width of the neighborhood clique. A radius of r
             means a (2r+1) x (2r+1) neighborhood. Default: 1 (3x3).
+        kernel: 'uniform' (equal weights) or 'gaussian' (distance-dependent).
+        gaussian_sigma: Sigma for Gaussian kernel in pixels. Only used when
+            kernel='gaussian'. Default: 1.0.
 
     Returns:
         2D array of shape (H, W) with estimated conditional entropy at
         each position. Sampled positions have entropy = 0.
     """
-    from scipy.ndimage import uniform_filter
+    from scipy.ndimage import uniform_filter, gaussian_filter
 
     H, W = field.shape
     size = 2 * clique_radius + 1
@@ -467,10 +472,15 @@ def mrf_conditional_entropy(
     sampled_float = sampled_mask.astype(np.float64)
     sampled_values = (field * sampled_mask).astype(np.float64)
 
-    # uniform_filter computes local mean; multiply by area to get local sum
-    area = size ** 2
-    n_sampled = uniform_filter(sampled_float, size=size, mode='constant') * area
-    n_ones = uniform_filter(sampled_values, size=size, mode='constant') * area
+    if kernel == 'gaussian':
+        # Gaussian kernel: distance-dependent weighting of neighbors
+        n_sampled = gaussian_filter(sampled_float, sigma=gaussian_sigma, mode='constant')
+        n_ones = gaussian_filter(sampled_values, sigma=gaussian_sigma, mode='constant')
+    else:
+        # uniform_filter computes local mean; multiply by area to get local sum
+        area = size ** 2
+        n_sampled = uniform_filter(sampled_float, size=size, mode='constant') * area
+        n_ones = uniform_filter(sampled_values, size=size, mode='constant') * area
 
     # Laplace-smoothed probability estimate
     p = (n_ones + alpha) / (n_sampled + 2 * alpha)

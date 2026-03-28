@@ -146,6 +146,27 @@ def test_mrf_entropy_no_sampled():
     print("  [PASS] MRF entropy no-sampled (max uncertainty)")
 
 
+def test_mrf_entropy_gaussian_kernel():
+    """Gaussian kernel should produce valid entropy and differ from uniform."""
+    np.random.seed(42)
+    field = np.random.randint(0, 2, (32, 32)).astype(np.float64)
+    mask = np.zeros((32, 32), dtype=bool)
+    mask[16, 16] = True
+
+    h_uniform = mrf_conditional_entropy(field, mask, clique_radius=2, kernel='uniform')
+    h_gaussian = mrf_conditional_entropy(field, mask, clique_radius=2,
+                                          kernel='gaussian', gaussian_sigma=1.0)
+
+    assert h_gaussian.shape == (32, 32), f"Expected (32,32), got {h_gaussian.shape}"
+    assert h_gaussian[16, 16] == 0, "Sampled position should have zero entropy"
+    assert np.all(h_gaussian >= 0), "All entropy values must be non-negative"
+    assert np.all(h_gaussian <= 1.0 + 1e-10), "Binary entropy must be <= 1 bit"
+    # Gaussian and uniform kernels should generally produce different results
+    assert not np.allclose(h_uniform, h_gaussian, atol=1e-6), \
+        "Gaussian kernel should produce different results from uniform"
+    print("  [PASS] MRF entropy with Gaussian kernel")
+
+
 if __name__ == '__main__':
     print("Running entropy tests...")
     test_binary_entropy_bounds()
@@ -161,4 +182,5 @@ if __name__ == '__main__':
     test_mrf_entropy()
     test_mrf_entropy_all_sampled()
     test_mrf_entropy_no_sampled()
+    test_mrf_entropy_gaussian_kernel()
     print("\nAll entropy tests passed!")
