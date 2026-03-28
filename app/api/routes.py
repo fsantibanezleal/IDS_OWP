@@ -377,6 +377,17 @@ class AnimatedRequest(BaseModel):
     seed: Optional[int] = None
 
 
+class StepRequest(BaseModel):
+    """Request to compute a single sampling step."""
+    method: str = Field(default="random_uniform")
+    step: int = Field(default=1, ge=1)
+    num_samples: int = Field(default=20, ge=1, le=200)
+    pattern_radius: int = Field(default=3, ge=1, le=10)
+    num_training_images: int = Field(default=5, ge=1, le=20)
+    recon_method: str = Field(default="kriging")
+    seed: Optional[int] = None
+
+
 @router.post("/process-animated")
 async def process_animated(req: AnimatedRequest) -> Dict[str, Any]:
     """Return sample-by-sample evolution for any method.
@@ -480,6 +491,123 @@ async def process_animated(req: AnimatedRequest) -> Dict[str, Any]:
         })
 
     return {"status": "ok", "method": method, "results": results}
+
+
+# ===== Per-step endpoint (non-blocking) =====
+
+# Cache precomputed positions per method to avoid recomputing each step
+_step_cache: Dict[str, Any] = {}
+
+
+@router.post("/process-step")
+async def process_step(req: StepRequest) -> Dict[str, Any]:
+    """Compute a SINGLE sampling step and return immediately.
+
+    The first call (step=1) precomputes all sample positions for
+    the requested method and caches them.  Subsequent calls just
+    index into the cache and compute entropy + reconstruction
+    for that single step.
+
+    This avoids blocking the browser while ALL steps are computed.
+    The frontend calls this in a loop, rendering between calls.
+    """
+    global _state, _step_cache
+
+    if _state["true_field"] is None:
+        return {"status": "error", "message": "No field generated."}
+
+    true_field = _state["true_field"]
+    training_image = _state["training_image"]
+    cache_key = f"{req.method}_{req.seed}_{req.num_samples}"
+
+    # First step: precompute all positions (fast) and cache them
+    if req.step == 1 or cache_key not in _step_cache:
+        method = req.method
+        if method == "random_uniform":
+            positions = random_uniform_sampling(true_field.shape, req.num_samples, seed=req.seed)
+        elif method == "stratified":
+            positions = stratified_sampling(true_field.shape, req.num_samples)
+        elif method == "random_stratified":
+            positions = random_stratified_sampling(true_field.shape, req.num_samples, seed=req.seed)
+        elif method == "multiscale_stratified":
+            positions = multiscale_stratified_sampling(true_field.shape, req.num_samples, seed=req.seed)
+        elif method == "oracle_entropy":
+            positions = oracle_entropy_sampling(true_field, req.num_samples, seed=req.seed)
+        elif method == "adaptive_entropy":
+            positions, _ = adaptive_entropy_sampling(
+                true_field, training_image, req.num_samples,
+                pattern_radius=req.pattern_radius, seed=req.seed,
+            )
+        elif method in ("penalized_adaptive", "hybrid_stratified_adaptive", "multiscale_adaptive"):
+            ti_seed = (req.seed + 2000) if req.seed is not None else None
+            training_ensemble = generate_training_ensemble(
+                field_type=_state["field_type"] or "multi_channel",
+                n_realizations=req.num_training_images,
+                field_size=training_image.shape, seed=ti_seed,
+            )
+            if method == "penalized_adaptive":
+                mask, order, _ = penalized_adaptive_sampling(
+                    true_field, training_ensemble, req.num_samples,
+                    pattern_radius=req.pattern_radius, seed=req.seed,
+                )
+            elif method == "hybrid_stratified_adaptive":
+                mask, order, _ = hybrid_stratified_adaptive_sampling(
+                    true_field, training_ensemble, req.num_samples,
+                    pattern_radius=req.pattern_radius, seed=req.seed,
+                )
+            else:
+                mask, order, _ = multiscale_adaptive_sampling(
+                    true_field, training_ensemble, req.num_samples,
+                    pattern_radius=req.pattern_radius, seed=req.seed,
+                )
+            sampled_positions = np.argwhere(mask)
+            orders = np.array([order[r, c] for r, c in sampled_positions])
+            sort_idx = np.argsort(orders)
+            positions = sampled_positions[sort_idx]
+        else:
+            return {"status": "error", "message": f"Unknown method: {method}"}
+
+        _step_cache[cache_key] = positions
+
+    positions = _step_cache[cache_key]
+    k = min(req.step, len(positions))
+
+    # Compute ONLY this step's entropy + reconstruction
+    positions_k = positions[:k]
+    sampled_field_k, mask_k = apply_sampling(true_field, positions_k)
+
+    p_prior = np.mean(training_image)
+    prob_field = np.full(true_field.shape, p_prior)
+    prob_field[mask_k] = sampled_field_k[mask_k]
+    ent = entropy_map(prob_field)
+    ent[mask_k] = 0.0
+
+    recon_kwargs = {}
+    if req.recon_method == "entropy_weighted":
+        recon_kwargs["entropy_field"] = ent
+    reconstructed = reconstruct(sampled_field_k, mask_k, method=req.recon_method, **recon_kwargs)
+
+    initial_ent = total_field_entropy(np.full(true_field.shape, p_prior))
+    current_ent = float(np.sum(ent))
+    metrics = compute_all_metrics(
+        true_field, reconstructed, positions_k,
+        initial_entropy=initial_ent, current_entropy=current_ent,
+    )
+    metrics_serial = {
+        km: float(v) if isinstance(v, (int, float, np.floating, np.integer)) else v
+        for km, v in metrics.items()
+    }
+
+    return {
+        "status": "ok",
+        "method": req.method,
+        "step": k,
+        "total_steps": len(positions),
+        "mask": mask_k.astype(int).tolist(),
+        "entropy_map": ent.tolist(),
+        "reconstruction": reconstructed.tolist(),
+        "metrics": metrics_serial,
+    }
 
 
 # ===== WebSocket for real-time adaptive sampling =====

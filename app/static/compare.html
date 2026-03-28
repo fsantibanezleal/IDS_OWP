@@ -203,30 +203,30 @@
             $('rowMetrics').innerHTML += `<div class="method-cell"><h4>${label}</h4><div class="metrics-text" id="mt-${i}">—</div></div>`;
         });
 
-        // Fetch animated results for ALL methods
-        stepInfo.textContent = 'Computing all methods...';
-        const promises = methods.map(m => apiPost('/api/process-animated', {
-            method:m, num_samples:numSamples, pattern_radius:3,
-            num_training_images:5, recon_method:'kriging', seed:seed+500
-        }));
-        const allResults = await Promise.all(promises);
-
-        // Show true field from first result
+        // Show true field
         const inferRes = await apiPost('/api/infer', {method:'kriging'});
         if (inferRes.true_field) drawField('cvRefTrue', inferRes.true_field);
 
-        // Animate step by step
-        const maxSteps = Math.max(...allResults.map(r => r.results ? r.results.length : 0));
+        // Step-by-step: fetch ONE step at a time per method (non-blocking)
+        // First call (step=1) precomputes positions, subsequent calls are fast
+        stepInfo.textContent = 'Starting step-by-step...';
 
-        for (let step=0; step<maxSteps; step++) {
+        for (let step=1; step<=numSamples; step++) {
             if (stopRequested) break;
 
-            stepInfo.textContent = `Step ${step+1} / ${maxSteps}`;
+            stepInfo.textContent = `Step ${step} / ${numSamples}`;
 
-            methods.forEach((m, i) => {
-                const res = allResults[i];
-                if (!res.results || step >= res.results.length) return;
-                const frame = res.results[step];
+            // Fetch current step for ALL methods in parallel (each is fast)
+            const stepPromises = methods.map(m => apiPost('/api/process-step', {
+                method:m, step:step, num_samples:numSamples,
+                pattern_radius:3, num_training_images:5,
+                recon_method:'kriging', seed:seed+500
+            }));
+            const stepResults = await Promise.all(stepPromises);
+
+            // Render each method's result for this step
+            stepResults.forEach((frame, i) => {
+                if (frame.status !== 'ok') return;
 
                 drawField(`cv-s-${i}`, frame.mask, 'mask');
                 drawField(`cv-e-${i}`, frame.entropy_map, 'entropy');
@@ -241,10 +241,11 @@
                 }
             });
 
+            // Wait between steps (user-controlled speed)
             await new Promise(r => setTimeout(r, parseInt($('animSpeed').value)));
         }
 
-        stepInfo.textContent = stopRequested ? 'Stopped' : `Done (${maxSteps} steps)`;
+        stepInfo.textContent = stopRequested ? 'Stopped' : `Done (${numSamples} steps)`;
         cleanup();
     }
 
