@@ -417,6 +417,84 @@ def _conditional_entropy_slow(
     return entropy_field
 
 
+def mrf_conditional_entropy(
+    field: np.ndarray,
+    sampled_mask: np.ndarray,
+    clique_radius: int = 1,
+    kernel: str = 'uniform',
+    gaussian_sigma: float = 1.0,
+) -> np.ndarray:
+    """Estimate conditional entropy using Markov Random Field cliques.
+
+    ===== MRF ENTROPY MODEL =====
+
+    Instead of computing P(X_i) from marginal statistics, uses
+    local neighborhood cliques to estimate P(X_i | neighbors):
+
+        H_MRF(X_i | sampled) = -sum_x P(X_i=x|clique) * log2(P(X_i=x|clique))
+
+    where the clique is the set of sampled neighbors within radius R
+    of position i. This captures spatial correlations that marginal
+    entropy misses.
+
+    For a binary field, the clique potential is:
+        P(X_i=1 | clique) = count(neighbors=1) / count(neighbors)
+
+    With Laplace smoothing to avoid zero probabilities:
+        P(X_i=1 | clique) = (count(1) + alpha) / (count + 2*alpha)
+
+    Implementation is fully vectorized using scipy.ndimage filters
+    to compute neighborhood sums via convolution, achieving O(H*W) complexity
+    independent of clique radius (no Python loops over pixels).
+
+    Args:
+        field: Current field state, shape (H, W). Binary values (0/1) at
+            sampled positions, arbitrary values elsewhere.
+        sampled_mask: Boolean mask of shape (H, W). True where field has
+            been sampled (value is known).
+        clique_radius: Half-width of the neighborhood clique. A radius of r
+            means a (2r+1) x (2r+1) neighborhood. Default: 1 (3x3).
+        kernel: 'uniform' (equal weights) or 'gaussian' (distance-dependent).
+        gaussian_sigma: Sigma for Gaussian kernel in pixels. Only used when
+            kernel='gaussian'. Default: 1.0.
+
+    Returns:
+        2D array of shape (H, W) with estimated conditional entropy at
+        each position. Sampled positions have entropy = 0.
+    """
+    from scipy.ndimage import uniform_filter, gaussian_filter
+
+    H, W = field.shape
+    size = 2 * clique_radius + 1
+    alpha = 0.5  # Laplace smoothing parameter
+
+    # Count sampled neighbors and their sum using convolution
+    sampled_float = sampled_mask.astype(np.float64)
+    sampled_values = (field * sampled_mask).astype(np.float64)
+
+    if kernel == 'gaussian':
+        # Gaussian kernel: distance-dependent weighting of neighbors
+        n_sampled = gaussian_filter(sampled_float, sigma=gaussian_sigma, mode='constant')
+        n_ones = gaussian_filter(sampled_values, sigma=gaussian_sigma, mode='constant')
+    else:
+        # uniform_filter computes local mean; multiply by area to get local sum
+        area = size ** 2
+        n_sampled = uniform_filter(sampled_float, size=size, mode='constant') * area
+        n_ones = uniform_filter(sampled_values, size=size, mode='constant') * area
+
+    # Laplace-smoothed probability estimate
+    p = (n_ones + alpha) / (n_sampled + 2 * alpha)
+    p = np.clip(p, 1e-10, 1 - 1e-10)
+
+    # Binary entropy: H(p) = -p*log2(p) - (1-p)*log2(1-p)
+    entropy_map_result = -p * np.log2(p) - (1 - p) * np.log2(1 - p)
+
+    # Known positions have zero entropy (no uncertainty)
+    entropy_map_result[sampled_mask] = 0.0
+
+    return entropy_map_result
+
+
 def information_gain(
     entropy_before: np.ndarray, entropy_after: np.ndarray
 ) -> float:

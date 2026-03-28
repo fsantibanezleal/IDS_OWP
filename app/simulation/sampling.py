@@ -60,6 +60,7 @@ from .entropy import (
     binary_entropy,
     entropy_map,
     conditional_entropy_estimate,
+    mrf_conditional_entropy,
     total_field_entropy,
 )
 

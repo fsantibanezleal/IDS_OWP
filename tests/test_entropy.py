@@ -18,6 +18,7 @@ from app.simulation.entropy import (
     total_field_entropy,
     information_gain,
     resolvability_capacity,
+    mrf_conditional_entropy,
 )
 
 
@@ -111,6 +112,61 @@ def test_resolvability_capacity():
     print("  [PASS] resolvability_capacity")
 
 
+def test_mrf_entropy():
+    """MRF conditional entropy produces valid results."""
+    np.random.seed(42)
+    field = np.random.randint(0, 2, (32, 32)).astype(np.float64)
+    mask = np.zeros((32, 32), dtype=bool)
+    mask[16, 16] = True
+
+    h = mrf_conditional_entropy(field, mask, clique_radius=2)
+    assert h.shape == (32, 32), f"Expected (32,32), got {h.shape}"
+    assert h[16, 16] == 0, "Sampled position should have zero entropy"
+    assert np.all(h >= 0), "All entropy values must be non-negative"
+    assert np.all(h <= 1.0 + 1e-10), "Binary entropy must be <= 1 bit"
+    print("  [PASS] MRF conditional entropy")
+
+
+def test_mrf_entropy_all_sampled():
+    """When all positions are sampled, entropy should be zero everywhere."""
+    field = np.random.randint(0, 2, (8, 8)).astype(np.float64)
+    mask = np.ones((8, 8), dtype=bool)
+    h = mrf_conditional_entropy(field, mask, clique_radius=1)
+    assert np.allclose(h, 0.0), "All-sampled field should have zero entropy"
+    print("  [PASS] MRF entropy all-sampled")
+
+
+def test_mrf_entropy_no_sampled():
+    """When no positions are sampled, entropy should use Laplace prior (p=0.5 -> H=1)."""
+    field = np.random.randint(0, 2, (8, 8)).astype(np.float64)
+    mask = np.zeros((8, 8), dtype=bool)
+    h = mrf_conditional_entropy(field, mask, clique_radius=1)
+    # With no sampled neighbors, p = alpha / (2*alpha) = 0.5, so H = 1.0
+    assert np.allclose(h, 1.0, atol=1e-6), "No-sampled field should have max entropy"
+    print("  [PASS] MRF entropy no-sampled (max uncertainty)")
+
+
+def test_mrf_entropy_gaussian_kernel():
+    """Gaussian kernel should produce valid entropy and differ from uniform."""
+    np.random.seed(42)
+    field = np.random.randint(0, 2, (32, 32)).astype(np.float64)
+    mask = np.zeros((32, 32), dtype=bool)
+    mask[16, 16] = True
+
+    h_uniform = mrf_conditional_entropy(field, mask, clique_radius=2, kernel='uniform')
+    h_gaussian = mrf_conditional_entropy(field, mask, clique_radius=2,
+                                          kernel='gaussian', gaussian_sigma=1.0)
+
+    assert h_gaussian.shape == (32, 32), f"Expected (32,32), got {h_gaussian.shape}"
+    assert h_gaussian[16, 16] == 0, "Sampled position should have zero entropy"
+    assert np.all(h_gaussian >= 0), "All entropy values must be non-negative"
+    assert np.all(h_gaussian <= 1.0 + 1e-10), "Binary entropy must be <= 1 bit"
+    # Gaussian and uniform kernels should generally produce different results
+    assert not np.allclose(h_uniform, h_gaussian, atol=1e-6), \
+        "Gaussian kernel should produce different results from uniform"
+    print("  [PASS] MRF entropy with Gaussian kernel")
+
+
 if __name__ == '__main__':
     print("Running entropy tests...")
     test_binary_entropy_bounds()
@@ -123,4 +179,8 @@ if __name__ == '__main__':
     test_total_field_entropy()
     test_information_gain()
     test_resolvability_capacity()
+    test_mrf_entropy()
+    test_mrf_entropy_all_sampled()
+    test_mrf_entropy_no_sampled()
+    test_mrf_entropy_gaussian_kernel()
     print("\nAll entropy tests passed!")
