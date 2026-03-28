@@ -260,6 +260,74 @@ def generate_random_field(
     return field
 
 
+def simulate_darcy_flow(permeability_field, well_positions, well_types,
+                         pressure_boundary=1.0, n_steps=50):
+    """Simple 2D Darcy flow proxy model for reservoir simulation.
+
+    Solves the pressure equation:
+        div(k * grad(p)) = q
+
+    using finite differences on the permeability field.
+    Well types: 'producer' (q < 0) or 'injector' (q > 0).
+
+    This is a proxy model -- not a full reservoir simulator, but
+    sufficient for comparing well placement strategies by their
+    cumulative production.
+
+    Args:
+        permeability_field: (H, W) binary field (1=high perm, 0=low)
+        well_positions: list of (row, col) tuples
+        well_types: list of 'producer' or 'injector'
+        pressure_boundary: boundary pressure condition
+        n_steps: number of pressure solve iterations (Jacobi)
+
+    Returns:
+        dict with:
+        - 'pressure': (H, W) pressure field
+        - 'flow_rate': total production rate
+        - 'npv': simplified NPV estimate
+    """
+    H, W = permeability_field.shape
+    k = permeability_field.astype(np.float64) * 0.9 + 0.1  # min perm 0.1
+
+    # Initialize pressure
+    p = np.full((H, W), pressure_boundary)
+
+    # Source/sink terms
+    q = np.zeros((H, W))
+    for (r, c), wtype in zip(well_positions, well_types):
+        if 0 <= r < H and 0 <= c < W:
+            q[r, c] = 1.0 if wtype == 'injector' else -1.0
+
+    # Jacobi iteration for pressure solve
+    for _ in range(n_steps):
+        p_new = p.copy()
+        # Interior points: 5-point stencil
+        p_new[1:-1, 1:-1] = (
+            k[1:-1, 1:-1] * (
+                p[2:, 1:-1] + p[:-2, 1:-1] +
+                p[1:-1, 2:] + p[1:-1, :-2]
+            ) / 4 + q[1:-1, 1:-1]
+        ) / (k[1:-1, 1:-1] + 1e-10)
+        p = p_new
+
+    # Compute production rate at producers
+    total_production = 0.0
+    for (r, c), wtype in zip(well_positions, well_types):
+        if wtype == 'producer' and 0 <= r < H and 0 <= c < W:
+            total_production += abs(k[r, c] * p[r, c])
+
+    # Simplified NPV (production - well cost)
+    well_cost = len(well_positions) * 10.0
+    npv = total_production * 100.0 - well_cost
+
+    return {
+        'pressure': p,
+        'flow_rate': float(total_production),
+        'npv': float(npv),
+    }
+
+
 def generate_field(
     field_type: str = "multi_channel",
     shape: Tuple[int, int] = (64, 64),

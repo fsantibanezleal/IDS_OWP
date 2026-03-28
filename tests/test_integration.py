@@ -17,6 +17,7 @@ from app.simulation.field_generator import (
     generate_multi_channel,
     generate_branching_channels,
     generate_random_field,
+    simulate_darcy_flow,
 )
 from app.simulation.sampling import (
     random_uniform_sampling,
@@ -192,6 +193,33 @@ def test_compute_all_metrics():
     print("  [PASS] compute_all_metrics")
 
 
+def test_darcy_flow():
+    """Darcy flow proxy model produces valid pressure field and production."""
+    field = np.ones((32, 32))
+    wells = [(8, 8), (24, 24)]
+    types = ['injector', 'producer']
+    result = simulate_darcy_flow(field, wells, types)
+    assert 'pressure' in result
+    assert 'flow_rate' in result
+    assert 'npv' in result
+    assert result['pressure'].shape == (32, 32)
+    assert result['flow_rate'] > 0
+    assert result['npv'] != 0
+    print(f"  [PASS] Darcy flow (rate={result['flow_rate']:.2f}, NPV={result['npv']:.1f})")
+
+
+def test_darcy_flow_multiple_wells():
+    """Darcy flow with multiple wells should produce valid results."""
+    field = np.ones((32, 32))
+    wells = [(4, 4), (4, 28), (28, 4), (28, 28), (16, 16)]
+    types = ['injector', 'injector', 'producer', 'producer', 'producer']
+    result = simulate_darcy_flow(field, wells, types, n_steps=100)
+    assert result['pressure'].shape == (32, 32)
+    assert result['flow_rate'] > 0
+    # NPV accounts for well costs: 5 wells * 10 = 50 cost
+    print(f"  [PASS] Darcy flow multi-well (rate={result['flow_rate']:.2f}, NPV={result['npv']:.1f})")
+
+
 if __name__ == '__main__':
     print("Running integration tests...")
     test_field_generators()
@@ -204,4 +232,6 @@ if __name__ == '__main__':
     test_adaptive_entropy_small()
     test_reconstruct_dispatch()
     test_compute_all_metrics()
+    test_darcy_flow()
+    test_darcy_flow_multiple_wells()
     print("\nAll integration tests passed!")
