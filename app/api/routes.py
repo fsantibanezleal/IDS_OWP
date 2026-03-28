@@ -366,6 +366,122 @@ async def get_state() -> Dict[str, Any]:
     return result
 
 
+class AnimatedRequest(BaseModel):
+    """Request to run animated (step-by-step) sampling."""
+
+    method: str = Field(default="random_uniform")
+    num_samples: int = Field(default=20, ge=1, le=200)
+    pattern_radius: int = Field(default=3, ge=1, le=10)
+    num_training_images: int = Field(default=5, ge=1, le=20)
+    recon_method: str = Field(default="kriging")
+    seed: Optional[int] = None
+
+
+@router.post("/process-animated")
+async def process_animated(req: AnimatedRequest) -> Dict[str, Any]:
+    """Return sample-by-sample evolution for any method.
+
+    Runs the sampling method incrementally from 1 to num_samples,
+    computing entropy maps, reconstructions, and metrics at each step.
+    """
+    global _state
+
+    if _state["true_field"] is None:
+        return {"status": "error", "message": "No field generated. Call /api/generate first."}
+
+    true_field = _state["true_field"]
+    training_image = _state["training_image"]
+    method = req.method
+
+    # Get all positions at once using the full sample count
+    if method == "random_uniform":
+        all_positions = random_uniform_sampling(true_field.shape, req.num_samples, seed=req.seed)
+    elif method == "stratified":
+        all_positions = stratified_sampling(true_field.shape, req.num_samples)
+    elif method == "random_stratified":
+        all_positions = random_stratified_sampling(true_field.shape, req.num_samples, seed=req.seed)
+    elif method == "multiscale_stratified":
+        all_positions = multiscale_stratified_sampling(true_field.shape, req.num_samples, seed=req.seed)
+    elif method == "oracle_entropy":
+        all_positions = oracle_entropy_sampling(true_field, req.num_samples, seed=req.seed)
+    elif method == "adaptive_entropy":
+        all_positions, _ = adaptive_entropy_sampling(
+            true_field, training_image, req.num_samples,
+            pattern_radius=req.pattern_radius, seed=req.seed,
+        )
+    elif method in ("penalized_adaptive", "hybrid_stratified_adaptive", "multiscale_adaptive"):
+        ti_seed = (req.seed + 2000) if req.seed is not None else None
+        training_ensemble = generate_training_ensemble(
+            field_type=_state["field_type"] or "multi_channel",
+            n_realizations=req.num_training_images,
+            field_size=training_image.shape,
+            seed=ti_seed,
+        )
+        if method == "penalized_adaptive":
+            mask, order, _ = penalized_adaptive_sampling(
+                true_field, training_ensemble, req.num_samples,
+                pattern_radius=req.pattern_radius, seed=req.seed,
+            )
+        elif method == "hybrid_stratified_adaptive":
+            mask, order, _ = hybrid_stratified_adaptive_sampling(
+                true_field, training_ensemble, req.num_samples,
+                pattern_radius=req.pattern_radius, seed=req.seed,
+            )
+        else:
+            mask, order, _ = multiscale_adaptive_sampling(
+                true_field, training_ensemble, req.num_samples,
+                pattern_radius=req.pattern_radius, seed=req.seed,
+            )
+        sampled_positions = np.argwhere(mask)
+        orders = np.array([order[r, c] for r, c in sampled_positions])
+        sort_idx = np.argsort(orders)
+        all_positions = sampled_positions[sort_idx]
+    else:
+        return {"status": "error", "message": f"Unknown method: {method}"}
+
+    # Now build step-by-step results
+    results = []
+    for k in range(1, len(all_positions) + 1):
+        positions_k = all_positions[:k]
+        sampled_field_k, mask_k = apply_sampling(true_field, positions_k)
+
+        # Entropy
+        p_prior = np.mean(training_image)
+        prob_field = np.full(true_field.shape, p_prior)
+        prob_field[mask_k] = sampled_field_k[mask_k]
+        ent = entropy_map(prob_field)
+        ent[mask_k] = 0.0
+
+        # Reconstruction
+        recon_kwargs = {}
+        if req.recon_method == "entropy_weighted":
+            recon_kwargs["entropy_field"] = ent
+        reconstructed = reconstruct(sampled_field_k, mask_k, method=req.recon_method, **recon_kwargs)
+
+        # Metrics
+        initial_ent = total_field_entropy(np.full(true_field.shape, p_prior))
+        current_ent = float(np.sum(ent))
+        metrics = compute_all_metrics(
+            true_field, reconstructed, positions_k,
+            initial_entropy=initial_ent,
+            current_entropy=current_ent,
+        )
+        metrics_serial = {
+            k_m: float(v) if isinstance(v, (int, float, np.floating, np.integer)) else v
+            for k_m, v in metrics.items()
+        }
+
+        results.append({
+            "step": k,
+            "mask": mask_k.astype(int).tolist(),
+            "entropy_map": ent.tolist(),
+            "reconstruction": reconstructed.tolist(),
+            "metrics": metrics_serial,
+        })
+
+    return {"status": "ok", "method": method, "results": results}
+
+
 # ===== WebSocket for real-time adaptive sampling =====
 
 

@@ -47,6 +47,12 @@ async def root():
     return FileResponse(str(STATIC_DIR / "index.html"))
 
 
+@app.get("/compare")
+async def compare_page():
+    """Serve the parallel comparison page."""
+    return FileResponse(str(STATIC_DIR / "compare.html"))
+
+
 @app.get("/health")
 async def health():
     """Health check endpoint."""

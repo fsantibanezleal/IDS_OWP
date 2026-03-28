@@ -328,6 +328,81 @@ def simulate_darcy_flow(permeability_field, well_positions, well_types,
     }
 
 
+def _generate_porphyry(size, rng):
+    """Concentric/radial pattern mimicking porphyry copper deposits."""
+    H, W = size
+    cx, cy = H // 2 + rng.integers(-H // 6, H // 6), W // 2 + rng.integers(-W // 6, W // 6)
+    y, x = np.ogrid[:H, :W]
+    r = np.sqrt((y - cy) ** 2 + (x - cx) ** 2)
+    # Concentric rings + radial veins
+    rings = np.sin(r * 0.3) > 0.3
+    angle = np.arctan2(y - cy, x - cx)
+    veins = np.sin(angle * rng.integers(3, 8)) > 0.7
+    return (rings | veins).astype(np.float64)
+
+
+def _generate_veins(size, rng):
+    """Thin branching vein network."""
+    H, W = size
+    field = np.zeros((H, W), dtype=np.float64)
+    # Random walk veins
+    for _ in range(rng.integers(3, 8)):
+        x, y = int(rng.integers(0, W)), int(rng.integers(0, H))
+        for _ in range(max(H, W) * 2):
+            field[y % H, x % W] = 1
+            dx, dy = int(rng.choice([-1, 0, 1])), int(rng.choice([-1, 0, 1]))
+            x += dx
+            y += dy
+            # Occasional branching
+            if rng.random() < 0.05:
+                bx, by = x, y
+                for _ in range(int(rng.integers(5, 20))):
+                    field[by % H, bx % W] = 1
+                    bx += int(rng.choice([-1, 0, 1]))
+                    by += int(rng.choice([-1, 0, 1]))
+    return field
+
+
+def _generate_faulted(size, rng):
+    """Angular fault-bounded blocks."""
+    H, W = size
+    y, x = np.ogrid[:H, :W]
+    n_faults = int(rng.integers(2, 5))
+    field = np.zeros((H, W))
+    for _ in range(n_faults):
+        angle = rng.uniform(0, np.pi)
+        offset = rng.uniform(-H / 2, H / 2)
+        field += (y * np.cos(angle) + x * np.sin(angle) > offset).astype(float)
+    return (field % 2).astype(np.float64)
+
+
+def _generate_folded(size, rng):
+    """Sinusoidal folded layers."""
+    H, W = size
+    y, x = np.mgrid[:H, :W]
+    freq = rng.uniform(0.05, 0.15)
+    amp = rng.uniform(5, 15)
+    phase = rng.uniform(0, 2 * np.pi)
+    shifted_y = y + amp * np.sin(freq * x + phase)
+    n_layers = int(rng.integers(3, 7))
+    layer_thickness = H / n_layers
+    return ((shifted_y / layer_thickness).astype(int) % 2).astype(np.float64)
+
+
+def _generate_disseminated(size, rng):
+    """Scattered small mineral clusters."""
+    H, W = size
+    field = np.zeros((H, W), dtype=np.float64)
+    n_clusters = int(rng.integers(10, 30))
+    for _ in range(n_clusters):
+        cy, cx = int(rng.integers(0, H)), int(rng.integers(0, W))
+        radius = int(rng.integers(1, 4))
+        y, x = np.ogrid[:H, :W]
+        mask = (y - cy) ** 2 + (x - cx) ** 2 <= radius ** 2
+        field[mask] = 1
+    return field
+
+
 def generate_field(
     field_type: str = "multi_channel",
     shape: Tuple[int, int] = (64, 64),
@@ -356,6 +431,11 @@ def generate_field(
         "multi_channel": generate_multi_channel,
         "branching": generate_branching_channels,
         "random": generate_random_field,
+        "porphyry": lambda shape, seed, **kw: _generate_porphyry(shape, np.random.default_rng(seed)),
+        "veins": lambda shape, seed, **kw: _generate_veins(shape, np.random.default_rng(seed)),
+        "faulted": lambda shape, seed, **kw: _generate_faulted(shape, np.random.default_rng(seed)),
+        "folded": lambda shape, seed, **kw: _generate_folded(shape, np.random.default_rng(seed)),
+        "disseminated": lambda shape, seed, **kw: _generate_disseminated(shape, np.random.default_rng(seed)),
     }
 
     if field_type not in generators:
