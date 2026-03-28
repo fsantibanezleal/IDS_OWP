@@ -173,6 +173,7 @@ async def generate_endpoint(req: GenerateRequest) -> Dict[str, Any]:
         "ti_shape": list(ti_shape),
         "field_proportion": float(np.mean(true_field)),
         "ti_proportion": float(np.mean(training_image)),
+        "true_field": _array_to_list(true_field),
         "training_image": _array_to_list(training_image),
         "entropy_map": _array_to_list(ent),
         "initial_entropy": float(np.sum(ent)),
