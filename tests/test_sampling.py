@@ -20,6 +20,7 @@ from app.simulation.sampling import (
     penalized_adaptive_sampling,
     hybrid_stratified_adaptive_sampling,
     multiscale_adaptive_sampling,
+    pso_sampling,
     apply_sampling,
 )
 from app.simulation.field_generator import (
@@ -236,6 +237,43 @@ def test_multi_ti_probability():
     print("  [PASS] multi_ti_probability")
 
 
+def test_pso_sampling():
+    """PSO sampling produces valid positions with positive fitness."""
+    field = generate_random_field(FIELD_SHAPE, proportion=0.3, correlation_length=5, seed=42)
+    training_images = generate_training_ensemble(
+        field_type='random', n_realizations=3,
+        field_size=(48, 48), seed=400,
+    )
+
+    mask, order, fitness_hist = pso_sampling(
+        field, training_images, num_samples=10,
+        n_particles=10, n_iterations=15, seed=42,
+    )
+
+    # Check samples were placed
+    num_placed = int(np.sum(mask))
+    assert num_placed > 0, "PSO should place at least 1 sample"
+    assert num_placed <= 10, f"Too many samples: {num_placed}"
+
+    # Check all positions in bounds
+    positions = np.argwhere(mask)
+    assert np.all(positions[:, 0] >= 0) and np.all(positions[:, 0] < FIELD_SHAPE[0])
+    assert np.all(positions[:, 1] >= 0) and np.all(positions[:, 1] < FIELD_SHAPE[1])
+
+    # Fitness should be non-negative and non-decreasing (global best)
+    assert len(fitness_hist) == 15, f"Expected 15 fitness values, got {len(fitness_hist)}"
+    assert all(f >= 0 for f in fitness_hist), "Fitness should be non-negative"
+    # Global best fitness should be monotonically non-decreasing
+    for i in range(1, len(fitness_hist)):
+        assert fitness_hist[i] >= fitness_hist[i - 1] - 1e-10, \
+            f"Global best fitness decreased at iteration {i}"
+
+    # Order values should be sequential from 1
+    orders = sorted(order[mask])
+    assert orders[0] == 1, f"First order should be 1, got {orders[0]}"
+    print("  [PASS] pso_sampling")
+
+
 def test_training_ensemble_generation():
     """Training ensemble generates the right number of distinct TIs."""
     ensemble = generate_training_ensemble(
@@ -265,5 +303,6 @@ if __name__ == '__main__':
     test_hybrid_stratified_adaptive()
     test_multiscale_adaptive()
     test_multi_ti_probability()
+    test_pso_sampling()
     test_training_ensemble_generation()
     print("\nAll sampling tests passed!")
