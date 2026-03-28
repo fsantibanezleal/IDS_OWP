@@ -21,6 +21,7 @@ from app.simulation.sampling import (
     hybrid_stratified_adaptive_sampling,
     multiscale_adaptive_sampling,
     pso_sampling,
+    bayesian_gp_sampling,
     apply_sampling,
 )
 from app.simulation.field_generator import (
@@ -274,6 +275,38 @@ def test_pso_sampling():
     print("  [PASS] pso_sampling")
 
 
+def test_bayesian_gp_sampling():
+    """Bayesian GP sampling places samples using UCB acquisition."""
+    field = generate_random_field(FIELD_SHAPE, proportion=0.3, correlation_length=5, seed=42)
+    training_images = generate_training_ensemble(
+        field_type='random', n_realizations=3,
+        field_size=(48, 48), seed=500,
+    )
+
+    mask, order, ucb_hist = bayesian_gp_sampling(
+        field, training_images, num_samples=10,
+        kernel_length=3.0, exploration_weight=1.0, seed=42,
+    )
+
+    # Check correct number of samples
+    num_placed = int(np.sum(mask))
+    assert num_placed == 10, f"Expected 10 samples, got {num_placed}"
+
+    # Check order is sequential 1..10
+    orders = order[mask]
+    assert set(orders) == set(range(1, 11)), f"Order values unexpected: {sorted(orders)}"
+
+    # UCB history should have entries (starts at step 3, so 8 entries)
+    assert len(ucb_hist) > 0, "UCB history should have entries"
+    assert all(isinstance(v, float) for v in ucb_hist), "UCB values should be floats"
+
+    # Check all positions in bounds
+    positions = np.argwhere(mask)
+    assert np.all(positions[:, 0] >= 0) and np.all(positions[:, 0] < FIELD_SHAPE[0])
+    assert np.all(positions[:, 1] >= 0) and np.all(positions[:, 1] < FIELD_SHAPE[1])
+    print("  [PASS] bayesian_gp_sampling")
+
+
 def test_training_ensemble_generation():
     """Training ensemble generates the right number of distinct TIs."""
     ensemble = generate_training_ensemble(
@@ -304,5 +337,6 @@ if __name__ == '__main__':
     test_multiscale_adaptive()
     test_multi_ti_probability()
     test_pso_sampling()
+    test_bayesian_gp_sampling()
     test_training_ensemble_generation()
     print("\nAll sampling tests passed!")

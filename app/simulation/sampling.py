@@ -1085,6 +1085,136 @@ def pso_sampling(
     return mask, order, fitness_history
 
 
+def bayesian_gp_sampling(field, training_images, num_samples,
+                          kernel_length=3.0, exploration_weight=1.0, seed=None):
+    """Bayesian optimization for well placement using Gaussian Process.
+
+    Uses a GP surrogate model to predict the entropy at unsampled
+    locations, then selects the next sample at the point with
+    highest Upper Confidence Bound (UCB):
+
+        UCB(x) = mu(x) + kappa * sigma(x)
+
+    where mu is the GP mean (predicted entropy), sigma is the GP
+    standard deviation (uncertainty), and kappa controls exploration
+    vs exploitation.
+
+    The GP kernel is a squared exponential (RBF):
+        k(x, x') = exp(-||x - x'||^2 / (2 * l^2))
+
+    This is more principled than greedy entropy maximization because
+    it explicitly models uncertainty and uses it for exploration.
+
+    Args:
+        field: 2D binary field (H, W).
+        training_images: List of training images.
+        num_samples: Number of samples to place.
+        kernel_length: GP kernel length scale (pixels).
+        exploration_weight: kappa in UCB (higher = more exploration).
+        seed: Random seed.
+
+    Returns:
+        (sampled_mask, sample_order, ucb_history)
+    """
+    rng = np.random.default_rng(seed)
+    H, W = field.shape
+    sampled_mask = np.zeros((H, W), dtype=bool)
+    sample_order = np.zeros((H, W), dtype=int)
+    ucb_history = []
+
+    # All candidate positions
+    all_positions = np.array([(i, j) for i in range(H) for j in range(W)])
+
+    # Initial entropy estimate from training images
+    marginal_p = np.mean([np.mean(ti) for ti in training_images])
+
+    # Observed values: (position, entropy_value) pairs
+    observed_pos = []
+    observed_vals = []
+
+    for k in range(1, num_samples + 1):
+        if k <= 2:
+            # First 2 samples: random to bootstrap GP
+            free = all_positions[~sampled_mask.flatten()]
+            idx = rng.integers(0, len(free))
+            si, sj = free[idx]
+        else:
+            # GP prediction at all unsampled positions
+            free_mask = ~sampled_mask.flatten()
+            free_positions = all_positions[free_mask]
+
+            if len(observed_pos) < 2 or len(free_positions) == 0:
+                break
+
+            obs_arr = np.array(observed_pos, dtype=np.float64)
+            val_arr = np.array(observed_vals, dtype=np.float64)
+
+            # GP kernel matrix (observed x observed)
+            K = _rbf_kernel(obs_arr, obs_arr, kernel_length)
+            K += 1e-6 * np.eye(len(K))  # nugget for numerical stability
+
+            # GP kernel (free x observed)
+            K_star = _rbf_kernel(free_positions.astype(np.float64), obs_arr, kernel_length)
+
+            # GP mean and variance at free positions
+            try:
+                L = np.linalg.cholesky(K)
+                alpha = np.linalg.solve(L.T, np.linalg.solve(L, val_arr))
+                mu = K_star @ alpha
+
+                v = np.linalg.solve(L, K_star.T)
+                var = 1.0 - np.sum(v**2, axis=0)
+                var = np.maximum(var, 0)
+                sigma = np.sqrt(var)
+            except np.linalg.LinAlgError:
+                # Fallback: use entropy directly
+                mu = np.ones(len(free_positions)) * 0.5
+                sigma = np.ones(len(free_positions))
+
+            # UCB acquisition function
+            ucb = mu + exploration_weight * sigma
+            best_idx = np.argmax(ucb)
+            si, sj = free_positions[best_idx]
+            ucb_history.append(float(np.max(ucb)))
+
+        sampled_mask[si, sj] = True
+        sample_order[si, sj] = k
+
+        # Observe: compute local entropy at this position
+        observed_pos.append([si, sj])
+        local_entropy = _compute_local_entropy(field, sampled_mask, si, sj, marginal_p)
+        observed_vals.append(local_entropy)
+
+    return sampled_mask, sample_order, ucb_history
+
+
+def _rbf_kernel(X1, X2, length_scale):
+    """Squared exponential (RBF) kernel matrix."""
+    sq_dist = np.sum((X1[:, None, :] - X2[None, :, :]) ** 2, axis=2)
+    return np.exp(-sq_dist / (2 * length_scale ** 2))
+
+
+def _compute_local_entropy(field, sampled_mask, si, sj, marginal_p, radius=3):
+    """Compute local entropy around a sampled position."""
+    H, W = field.shape
+    r = radius
+    i_min, i_max = max(0, si-r), min(H, si+r+1)
+    j_min, j_max = max(0, sj-r), min(W, sj+r+1)
+
+    local = field[i_min:i_max, j_min:j_max]
+    local_mask = sampled_mask[i_min:i_max, j_min:j_max]
+
+    sampled_vals = local[local_mask]
+    if len(sampled_vals) == 0:
+        p = marginal_p
+    else:
+        p = (np.sum(sampled_vals) + 0.5) / (len(sampled_vals) + 1.0)
+
+    # Binary entropy
+    p = np.clip(p, 1e-10, 1 - 1e-10)
+    return -p * np.log2(p) - (1 - p) * np.log2(1 - p)
+
+
 def apply_sampling(
     true_field: np.ndarray,
     positions: np.ndarray,
