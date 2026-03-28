@@ -62,14 +62,18 @@
             </select></label>
             <label>Samples: <input type="number" id="numSamples" value="20" min="3" max="100" style="width:50px"></label>
             <label>Speed (ms): <input type="range" id="animSpeed" min="50" max="1000" value="200" style="width:100px"><span id="speedVal">200</span></label>
-            <label>Methods: <select id="methodSelect" multiple size="3" style="min-width:180px;font-size:11px">
+            <label>Methods: <select id="methodSelect" multiple size="6" style="min-width:220px;font-size:11px">
                 <option value="random_uniform" selected>Random Uniform</option>
                 <option value="stratified" selected>Stratified Grid</option>
-                <option value="adaptive_entropy" selected>Adaptive Entropy</option>
+                <option value="random_stratified">Random Stratified</option>
+                <option value="multiscale_stratified">Multiscale Stratified</option>
+                <option value="oracle_entropy">Oracle Entropy</option>
+                <option value="adaptive_entropy" selected>Adaptive (AdSEMES)</option>
                 <option value="penalized_adaptive" selected>Penalized Adaptive</option>
-                <option value="multiscale_stratified">Multiscale</option>
-                <option value="oracle_entropy">Oracle</option>
-                <option value="bayesian_gp">Bayesian GP</option>
+                <option value="hybrid_stratified_adaptive">Hybrid Stratified+Adaptive</option>
+                <option value="multiscale_adaptive">Multiscale Adaptive</option>
+                <option value="pso">PSO (Particle Swarm)</option>
+                <option value="bayesian_gp">Bayesian GP (UCB)</option>
             </select></label>
             <button id="startBtn">▶ Run Comparison</button>
             <button id="stopBtn" disabled>■ Stop</button>
@@ -97,6 +101,22 @@
         <!-- Row: Metrics -->
         <div class="section-label">Statistics</div>
         <div class="method-grid" id="rowMetrics"></div>
+
+        <!-- Summary table (shown after completion) -->
+        <div id="summarySection" style="display:none;margin-top:16px;">
+            <div class="section-label">Final Summary</div>
+            <table id="summaryTable" style="width:100%;border-collapse:collapse;font-size:12px;color:var(--text);margin-bottom:8px;">
+                <thead><tr style="border-bottom:2px solid var(--border);text-align:left;">
+                    <th style="padding:6px;">Method</th>
+                    <th style="padding:6px;">Accuracy</th>
+                    <th style="padding:6px;">SNR (dB)</th>
+                    <th style="padding:6px;">F1</th>
+                    <th style="padding:6px;">C_k (%)</th>
+                </tr></thead>
+                <tbody id="summaryBody"></tbody>
+            </table>
+            <button id="exportCsvBtn" style="padding:6px 14px;border:none;border-radius:5px;background:var(--green);color:#000;font-weight:600;cursor:pointer;font-size:12px;">📥 Export CSV</button>
+        </div>
     </main>
 
 <script>
@@ -184,7 +204,8 @@
         if (gen.status !== 'ok') { stepInfo.textContent='Generation failed'; cleanup(); return; }
 
         drawField('cvRefTI', gen.training_image);
-        // True field will come from first infer result
+        // True field from generate response
+        if (gen.true_field) drawField('cvRefTrue', gen.true_field);
 
         // Setup grid columns
         const nMethods = methods.length;
@@ -204,12 +225,18 @@
             $('rowMetrics').innerHTML += `<div class="method-cell"><h4>${label}</h4><div class="metrics-text" id="mt-${i}">—</div></div>`;
         });
 
-        // Show true field
-        const inferRes = await apiPost('/api/infer', {method:'kriging'});
-        if (inferRes.true_field) drawField('cvRefTrue', inferRes.true_field);
+        // Also try infer for true field as fallback
+        try {
+            const inferRes = await apiPost('/api/infer', {method:'kriging'});
+            if (inferRes.true_field) drawField('cvRefTrue', inferRes.true_field);
+        } catch(e) {}
 
-        // Step-by-step: fetch ONE step at a time per method (non-blocking)
-        // First call (step=1) precomputes positions, subsequent calls are fast
+        // Hide previous summary
+        $('summarySection').style.display = 'none';
+
+        // Track final metrics per method
+        const finalMetrics = {};
+
         stepInfo.textContent = 'Starting step-by-step...';
 
         for (let step=1; step<=numSamples; step++) {
@@ -238,7 +265,9 @@
                     const acc = mt.accuracy!==undefined ? (mt.accuracy*100).toFixed(1)+'%' : '?';
                     const snr = mt.snr_db!==undefined ? mt.snr_db.toFixed(1)+'dB' : '?';
                     const f1 = mt.cm_f1!==undefined ? (mt.cm_f1*100).toFixed(1)+'%' : '?';
-                    $(`mt-${i}`).innerHTML = `Acc:${acc} SNR:${snr} F1:${f1}`;
+                    const res = mt.resolvability!==undefined ? (mt.resolvability*100).toFixed(1)+'%' : '?';
+                    $(`mt-${i}`).innerHTML = `Acc:${acc} | SNR:${snr} | F1:${f1} | Ck:${res}`;
+                    finalMetrics[methods[i]] = mt;
                 }
             });
 
@@ -247,6 +276,52 @@
         }
 
         stepInfo.textContent = stopRequested ? 'Stopped' : `Done (${numSamples} steps)`;
+
+        // Show final summary table
+        if (Object.keys(finalMetrics).length > 0) {
+            const tbody = $('summaryBody');
+            tbody.innerHTML = '';
+
+            // Find best per metric
+            let bestAcc = -1, bestSnr = -Infinity, bestF1 = -1;
+            for (const [m, mt] of Object.entries(finalMetrics)) {
+                if (mt.accuracy > bestAcc) bestAcc = mt.accuracy;
+                if (mt.snr_db > bestSnr) bestSnr = mt.snr_db;
+                if (mt.cm_f1 > bestF1) bestF1 = mt.cm_f1;
+            }
+
+            for (const [m, mt] of Object.entries(finalMetrics)) {
+                const acc = mt.accuracy!==undefined ? (mt.accuracy*100).toFixed(1) : '?';
+                const snr = mt.snr_db!==undefined ? mt.snr_db.toFixed(1) : '?';
+                const f1 = mt.cm_f1!==undefined ? (mt.cm_f1*100).toFixed(1) : '?';
+                const ent = mt.resolvability!==undefined ? (mt.resolvability*100).toFixed(1) : '?';
+                const accBold = mt.accuracy >= bestAcc ? 'font-weight:bold;color:#a6e3a1' : '';
+                const snrBold = mt.snr_db >= bestSnr ? 'font-weight:bold;color:#a6e3a1' : '';
+                const f1Bold = mt.cm_f1 >= bestF1 ? 'font-weight:bold;color:#a6e3a1' : '';
+                tbody.innerHTML += `<tr style="border-bottom:1px solid var(--border);">
+                    <td style="padding:4px 6px;">${m.replace(/_/g,' ')}</td>
+                    <td style="padding:4px 6px;${accBold}">${acc}%</td>
+                    <td style="padding:4px 6px;${snrBold}">${snr} dB</td>
+                    <td style="padding:4px 6px;${f1Bold}">${f1}%</td>
+                    <td style="padding:4px 6px;">${ent}%</td>
+                </tr>`;
+            }
+            $('summarySection').style.display = 'block';
+
+            // Export CSV handler
+            $('exportCsvBtn').onclick = () => {
+                let csv = 'Method,Accuracy,SNR_dB,F1,Remaining_Entropy\\n';
+                for (const [m, mt] of Object.entries(finalMetrics)) {
+                    csv += `${m},${mt.accuracy||0},${mt.snr_db||0},${mt.cm_f1||0},${mt.resolvability||0}\\n`;
+                }
+                const blob = new Blob([csv], {type:'text/csv'});
+                const a = document.createElement('a');
+                a.href = URL.createObjectURL(blob);
+                a.download = 'owp_comparison_results.csv';
+                a.click();
+            };
+        }
+
         cleanup();
     }
 
