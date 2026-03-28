@@ -967,6 +967,124 @@ def multiscale_adaptive_sampling(
     return sampled_mask, sample_order, entropy_history
 
 
+def pso_sampling(
+    field: np.ndarray,
+    training_images: list,
+    num_samples: int,
+    n_particles: int = 20,
+    n_iterations: int = 50,
+    seed: Optional[int] = None,
+) -> Tuple[np.ndarray, np.ndarray, List[float]]:
+    """Particle Swarm Optimization for well placement.
+
+    Each particle represents a set of K sample positions.
+    The fitness function is the total information gain:
+        fitness = H(X) - H(X | sampled positions)
+
+    PSO update rules:
+        v_i = w*v_i + c1*r1*(pbest_i - x_i) + c2*r2*(gbest - x_i)
+        x_i = x_i + v_i
+
+    Positions are continuous in [0, H) x [0, W) and rounded to
+    integer grid positions for evaluation.
+
+    Args:
+        field: 2D binary field (H, W).
+        training_images: List of training images.
+        num_samples: K samples to place.
+        n_particles: Number of PSO particles.
+        n_iterations: Maximum iterations.
+        seed: Random seed.
+
+    Returns:
+        Tuple of (sampled_mask, sample_order, fitness_history):
+        - sampled_mask: Boolean array (H, W) of sampled positions.
+        - sample_order: Int array (H, W) with order of sampling (0 = unsampled).
+        - fitness_history: List of best fitness at each iteration.
+    """
+    rng = np.random.default_rng(seed)
+    H, W = field.shape
+    K = num_samples
+
+    # Initialize particles: each is K positions (shape: n_particles x K x 2)
+    particles = rng.uniform(0, [H, W], size=(n_particles, K, 2))
+    velocities = rng.uniform(-1, 1, size=(n_particles, K, 2))
+
+    # PSO parameters
+    w = 0.7    # inertia
+    c1 = 1.5   # cognitive (personal best)
+    c2 = 1.5   # social (global best)
+
+    pbest = particles.copy()
+    pbest_fitness = np.full(n_particles, -np.inf)
+    gbest = particles[0].copy()
+    gbest_fitness = -np.inf
+
+    marginal_p = np.mean([np.mean(ti) for ti in training_images])
+    total_entropy = total_field_entropy(np.full((H, W), marginal_p))
+
+    fitness_history: List[float] = []
+
+    for iteration in range(n_iterations):
+        for i in range(n_particles):
+            # Round positions to grid
+            positions = np.clip(particles[i].astype(int), [0, 0], [H - 1, W - 1])
+
+            # Remove duplicates
+            unique_positions = np.unique(positions, axis=0)
+
+            # Evaluate fitness: information gain
+            mask = np.zeros((H, W), dtype=bool)
+            for r, c in unique_positions:
+                mask[r, c] = True
+
+            prob = np.full((H, W), marginal_p)
+            prob[mask] = field[mask].astype(float)
+            ent = entropy_map(prob)
+            ent[mask] = 0.0
+            remaining = float(np.sum(ent))
+            fitness = total_entropy - remaining
+
+            # Update personal best
+            if fitness > pbest_fitness[i]:
+                pbest_fitness[i] = fitness
+                pbest[i] = particles[i].copy()
+
+            # Update global best
+            if fitness > gbest_fitness:
+                gbest_fitness = fitness
+                gbest = particles[i].copy()
+
+        fitness_history.append(float(gbest_fitness))
+
+        # PSO velocity update
+        r1 = rng.random(size=(n_particles, K, 2))
+        r2 = rng.random(size=(n_particles, K, 2))
+        velocities = (w * velocities +
+                      c1 * r1 * (pbest - particles) +
+                      c2 * r2 * (gbest[np.newaxis] - particles))
+
+        # Clamp velocity
+        velocities = np.clip(velocities, -2, 2)
+
+        # Update positions
+        particles += velocities
+        particles[:, :, 0] = np.clip(particles[:, :, 0], 0, H - 1)
+        particles[:, :, 1] = np.clip(particles[:, :, 1], 0, W - 1)
+
+    # Extract best solution
+    best_positions = np.clip(gbest.astype(int), [0, 0], [H - 1, W - 1])
+    unique_best = np.unique(best_positions, axis=0)
+
+    mask = np.zeros((H, W), dtype=bool)
+    order = np.zeros((H, W), dtype=int)
+    for k, (r, c) in enumerate(unique_best[:K]):
+        mask[r, c] = True
+        order[r, c] = k + 1
+
+    return mask, order, fitness_history
+
+
 def apply_sampling(
     true_field: np.ndarray,
     positions: np.ndarray,

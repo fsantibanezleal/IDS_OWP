@@ -29,6 +29,7 @@ from ..simulation.sampling import (
     penalized_adaptive_sampling,
     hybrid_stratified_adaptive_sampling,
     multiscale_adaptive_sampling,
+    pso_sampling,
     apply_sampling,
 )
 from ..simulation.field_generator import generate_training_ensemble
@@ -64,7 +65,8 @@ class SampleRequest(BaseModel):
         description=(
             "Sampling method: random_uniform, stratified, random_stratified, "
             "multiscale_stratified, oracle_entropy, adaptive_entropy, "
-            "penalized_adaptive, hybrid_stratified_adaptive, multiscale_adaptive"
+            "penalized_adaptive, hybrid_stratified_adaptive, multiscale_adaptive, "
+            "pso"
         ),
     )
     num_samples: int = Field(default=20, ge=1, le=1000)
@@ -214,7 +216,7 @@ async def sample_endpoint(req: SampleRequest) -> Dict[str, Any]:
             true_field, training_image, req.num_samples,
             pattern_radius=req.pattern_radius, seed=req.seed,
         )
-    elif method in ("penalized_adaptive", "hybrid_stratified_adaptive", "multiscale_adaptive"):
+    elif method in ("penalized_adaptive", "hybrid_stratified_adaptive", "multiscale_adaptive", "pso"):
         # Generate training ensemble for multi-TI methods
         ti_seed = (req.seed + 2000) if req.seed is not None else None
         training_ensemble = generate_training_ensemble(
@@ -232,6 +234,11 @@ async def sample_endpoint(req: SampleRequest) -> Dict[str, Any]:
             mask, order, ent_hist = hybrid_stratified_adaptive_sampling(
                 true_field, training_ensemble, req.num_samples,
                 pattern_radius=req.pattern_radius, seed=req.seed,
+            )
+        elif method == "pso":
+            mask, order, ent_hist = pso_sampling(
+                true_field, training_ensemble, req.num_samples,
+                seed=req.seed,
             )
         else:  # multiscale_adaptive
             mask, order, ent_hist = multiscale_adaptive_sampling(
@@ -420,7 +427,7 @@ async def process_animated(req: AnimatedRequest) -> Dict[str, Any]:
             true_field, training_image, req.num_samples,
             pattern_radius=req.pattern_radius, seed=req.seed,
         )
-    elif method in ("penalized_adaptive", "hybrid_stratified_adaptive", "multiscale_adaptive"):
+    elif method in ("penalized_adaptive", "hybrid_stratified_adaptive", "multiscale_adaptive", "pso"):
         ti_seed = (req.seed + 2000) if req.seed is not None else None
         training_ensemble = generate_training_ensemble(
             field_type=_state["field_type"] or "multi_channel",
@@ -437,6 +444,11 @@ async def process_animated(req: AnimatedRequest) -> Dict[str, Any]:
             mask, order, _ = hybrid_stratified_adaptive_sampling(
                 true_field, training_ensemble, req.num_samples,
                 pattern_radius=req.pattern_radius, seed=req.seed,
+            )
+        elif method == "pso":
+            mask, order, _ = pso_sampling(
+                true_field, training_ensemble, req.num_samples,
+                seed=req.seed,
             )
         else:
             mask, order, _ = multiscale_adaptive_sampling(
@@ -538,7 +550,7 @@ async def process_step(req: StepRequest) -> Dict[str, Any]:
                 true_field, training_image, req.num_samples,
                 pattern_radius=req.pattern_radius, seed=req.seed,
             )
-        elif method in ("penalized_adaptive", "hybrid_stratified_adaptive", "multiscale_adaptive"):
+        elif method in ("penalized_adaptive", "hybrid_stratified_adaptive", "multiscale_adaptive", "pso"):
             ti_seed = (req.seed + 2000) if req.seed is not None else None
             training_ensemble = generate_training_ensemble(
                 field_type=_state["field_type"] or "multi_channel",
@@ -554,6 +566,11 @@ async def process_step(req: StepRequest) -> Dict[str, Any]:
                 mask, order, _ = hybrid_stratified_adaptive_sampling(
                     true_field, training_ensemble, req.num_samples,
                     pattern_radius=req.pattern_radius, seed=req.seed,
+                )
+            elif method == "pso":
+                mask, order, _ = pso_sampling(
+                    true_field, training_ensemble, req.num_samples,
+                    seed=req.seed,
                 )
             else:
                 mask, order, _ = multiscale_adaptive_sampling(
