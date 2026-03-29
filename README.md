@@ -26,41 +26,41 @@ In subsurface exploration, each measurement well costs millions. Placing wells o
 
 ## Mathematical Model
 
-### Shannon Entropy
-
-The information content of a random field X is measured by:
-
-```
-H(X) = -Sum p(x) * log_2(p(x))
-```
-
-### Optimal Next Sample
-
-The next sample location maximizes the conditional entropy of the unsampled field:
+### Shannon Entropy — Quantifying Field Uncertainty
+The information content of a binary random field X measures how unpredictable the field values are before any samples are taken:
 
 ```
-f* = argmax H(X_bar_f)
+H(X) = −Σ p(x) · log₂(p(x))
 ```
 
-where `X_bar_f` is the remaining unsampled field conditioned on all samples including candidate *f*.
+where **p(x)** is the probability of each field configuration and the sum is over all possible states. For a binary field with equal probability of 0 or 1 at each cell, **H = 1 bit per cell**. Spatially correlated fields (channels, faults) have lower entropy because neighboring cells are predictable from each other.
 
-### Resolvability Capacity
+### Optimal Next Sample — Maximum Conditional Entropy
+The next well location is chosen to maximally reduce the remaining uncertainty about the unsampled field:
 
-The information contribution of the k-th sample normalized by total field entropy:
+```
+f* = argmax H(X̄_f)
+```
+
+where **X̄_f** is the remaining unsampled field conditioned on all samples collected so far plus candidate location **f**. This greedy criterion is near-optimal (within 63% of the global optimum) because entropy is a submodular set function — each additional sample provides diminishing but guaranteed information gain.
+
+### Resolvability Capacity — Information Efficiency Per Sample
+The fractional information gain from the k-th sample, normalized by the total field entropy:
 
 ```
 C_k = I(f*_k) / H(X)
 ```
 
-### Particle Size Distribution (Rosin-Rammler)
+where **I(f*_k)** is the mutual information provided by the k-th optimal sample. The resolvability curve C_k vs k shows how quickly the field is resolved — steep initial decline indicates that the first few wells are highly informative, while a flat tail means additional wells add little value.
 
-The cumulative retained fraction for the PSO-based grain size optimization:
+### Particle Size Distribution — Rosin-Rammler Model
+The cumulative retained fraction for grain size analysis, used in the PSO-based optimization module:
 
 ```
-R(x) = 1 - exp(-(x / x_0)^n)
+R(x) = 1 − exp(−(x / x₀)^n)
 ```
 
-where `x_0` is the characteristic grain size and `n` is the spread index.
+where **x₀** is the characteristic grain size (63.2% passing size) and **n** is the spread index (uniformity coefficient). Higher **n** means a narrower size distribution; **n = 1** gives an exponential distribution. This is fitted to sieve analysis data via nonlinear least squares.
 
 ---
 
