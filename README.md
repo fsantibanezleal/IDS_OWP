@@ -12,15 +12,24 @@ In subsurface exploration, each measurement well costs millions. Placing wells o
 
 ---
 
-## KPIs & Metrics
+## KPIs — Impact & Value
 
-| Metric | Target | Current |
-|--------|--------|---------|
-| Sampling methods | Comprehensive suite | 11 methods (greedy to Bayesian GP) |
-| Greedy optimality | (1−1/e) ≈ 63% of optimal | Submodularity guaranteed |
-| Field types | Diverse geological patterns | 9 types (channels to porphyries) |
-| Step-by-step animation | Non-blocking per step | /api/process-step endpoint |
-| Test coverage | Comprehensive | 40+ tests passing |
+| KPI | Impact |
+|-----|--------|
+| Cost optimization | Each saved well = millions of dollars in drilling costs |
+| Information-theoretic guarantee | Greedy achieves ≥63% of optimal (submodularity) |
+| Method comparison | 11 strategies evaluated simultaneously on same field |
+| Real-time visualization | Step-by-step entropy evolution vs batch offline computation |
+
+## Project Metrics & Status
+
+| Metric | Status |
+|--------|--------|
+| Tests | 40+ passing |
+| Sampling methods | 11 (random → Bayesian GP) |
+| Field types | 9 geological patterns |
+| Comparison page | All methods in parallel with per-step animation |
+| Reconstruction | 3 methods (nearest, kriging, entropy-weighted) |
 
 ---
 
