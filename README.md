@@ -21,19 +21,27 @@ In subsurface exploration, each measurement well costs millions. Placing wells o
 | Method comparison | 11 strategies evaluated simultaneously on same field |
 | Real-time visualization | Step-by-step entropy evolution vs batch offline computation |
 
-## Project Metrics & Status
+## Overview
 
-| Metric | Status |
-|--------|--------|
-| Tests | 40+ passing |
-| Sampling methods | 11 (random → Bayesian GP) |
-| Field types | 9 geological patterns |
-| Comparison page | All methods in parallel with per-step animation |
-| Reconstruction | 3 methods (nearest, kriging, entropy-weighted) |
+This application implements the AdSEMES (Adaptive Sequential Empirical Maximum Entropy Sampling) algorithm for optimal well placement in channelized geological reservoirs. It provides an interactive web interface for:
+
+- Generating synthetic binary fields (channelized, branching, random)
+- Comparing 9 sampling strategies (random, stratified, multiscale, oracle, adaptive, penalized, hybrid, multiscale-adaptive)
+- Reconstructing fields from sparse samples (nearest neighbor, kriging, entropy-weighted)
+- Evaluating performance (SNR, accuracy, resolvability capacity)
+
+![AdSEMES Algorithm](docs/svg/adsemes_algorithm.svg)
+![Sampling Comparison](docs/svg/sampling_comparison.svg)
 
 ---
 
-## Mathematical Model
+## Frontend
+
+![Frontend](docs/png/frontend.png)
+
+---
+
+## Technical Approach — Information-Theoretic Sampling
 
 ### Shannon Entropy — Quantifying Field Uncertainty
 The information content of a binary random field X measures how unpredictable the field values are before any samples are taken:
@@ -73,26 +81,6 @@ where **x₀** is the characteristic grain size (63.2% passing size) and **n** i
 
 ---
 
-## Overview
-
-This application implements the AdSEMES (Adaptive Sequential Empirical Maximum Entropy Sampling) algorithm for optimal well placement in channelized geological reservoirs. It provides an interactive web interface for:
-
-- Generating synthetic binary fields (channelized, branching, random)
-- Comparing 9 sampling strategies (random, stratified, multiscale, oracle, adaptive, penalized, hybrid, multiscale-adaptive)
-- Reconstructing fields from sparse samples (nearest neighbor, kriging, entropy-weighted)
-- Evaluating performance (SNR, accuracy, resolvability capacity)
-
-![AdSEMES Algorithm](docs/svg/adsemes_algorithm.svg)
-![Sampling Comparison](docs/svg/sampling_comparison.svg)
-
----
-
-## Frontend
-
-![Frontend](docs/png/frontend.png)
-
----
-
 ## Architecture
 
 ![Architecture](docs/svg/architecture.svg)
@@ -117,6 +105,16 @@ This application implements the AdSEMES (Adaptive Sequential Empirical Maximum E
 - **Parallel comparison** -- side-by-side strategy comparison at `/compare`
 - **WebSocket streaming** -- live updates during adaptive sampling iterations
 - **REST API** -- full control via HTTP endpoints with Swagger/ReDoc docs
+
+## Project Metrics & Status
+
+| Metric | Status |
+|--------|--------|
+| Tests | 40+ passing |
+| Sampling methods | 11 (random → Bayesian GP) |
+| Field types | 9 geological patterns |
+| Comparison page | All methods in parallel with per-step animation |
+| Reconstruction | 3 methods (nearest, kriging, entropy-weighted) |
 
 ---
 
