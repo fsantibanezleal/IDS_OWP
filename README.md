@@ -8,6 +8,20 @@ Information-theoretic framework for optimal spatial sampling design in binary ra
 
 In subsurface exploration, each measurement well costs millions. Placing wells optimally to maximize information while minimizing cost is a combinatorial optimization problem. Shannon information theory provides a principled framework: sample where entropy is highest.
 
+![Information Theory](docs/svg/information_theory.svg)
+
+---
+
+## KPIs & Metrics
+
+| Metric | Target | Current |
+|--------|--------|---------|
+| Sampling methods | Comprehensive suite | 11 methods (greedy to Bayesian GP) |
+| Greedy optimality | (1−1/e) ≈ 63% of optimal | Submodularity guaranteed |
+| Field types | Diverse geological patterns | 9 types (channels to porphyries) |
+| Step-by-step animation | Non-blocking per step | /api/process-step endpoint |
+| Test coverage | Comprehensive | 40+ tests passing |
+
 ---
 
 ## Mathematical Model
