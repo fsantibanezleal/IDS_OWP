@@ -90,7 +90,7 @@ Used for computing conditional entropy from pattern matching probabilities.
 **Submodularity Guarantee:**
 The greedy sequential approach achieves a (1 - 1/e) approximation to the optimal K-sample placement, leveraging the submodularity of entropy as a set function.
 
-> See `docs/diagrams/architecture.svg` for visual reference.
+> See `docs/svg/architecture.svg` for visual reference.
 
 ### Technical Stack
 
