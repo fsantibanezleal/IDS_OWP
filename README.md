@@ -1,5 +1,8 @@
 # OWP - Optimal Well Placement
 
+[![License](https://img.shields.io/github/license/fsantibanezleal/IDS_OWP)](LICENSE)
+[![Live demo](https://img.shields.io/badge/demo-live-2ea44f)](https://owp.fasl-work.com)
+
 Information-theoretic framework for optimal spatial sampling design in binary random fields.
 
 ---
